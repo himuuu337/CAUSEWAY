@@ -1,0 +1,112 @@
+"""Experiment planning: schema, validator, providers, and the fallback path.
+
+The model proposes. This package decides whether the proposal is allowed to
+run. causeway/verdict.py decides what the result means. Those three
+responsibilities never merge, and the dependency only points one way: this
+package imports causeway.verdict, and causeway.verdict imports nothing from
+here. A test walks the import graph and fails the build if that ever inverts.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from causeway import verdict
+from causeway.planner.deterministic import DeterministicPlanner
+from causeway.planner.schema import (ExperimentPlan, PlanRequest,
+                                     PLAN_SCHEMA, ProviderUnavailable)
+from causeway.planner.validator import ValidationReport, validate
+
+
+@dataclass(frozen=True)
+class PlanOutcome:
+    plan: ExperimentPlan
+    report: ValidationReport
+    # Where the accepted plan actually came from. The UI shows this verbatim.
+    source: str
+    kind: str                    # "gemini" | "deterministic"
+    proposed_by: str = ""        # who was asked first
+    fallback_reason: str = ""    # why the first choice was not used
+
+    @property
+    def used_fallback(self) -> bool:
+        return bool(self.fallback_reason)
+
+    def as_dict(self) -> dict:
+        return {
+            "plan": self.plan.as_dict(),
+            "validation": self.report.as_dict(),
+            "provenance": {
+                "source": self.source,
+                "kind": self.kind,
+                "proposed_by": self.proposed_by or self.source,
+                "used_fallback": self.used_fallback,
+                "fallback_reason": self.fallback_reason,
+            },
+        }
+
+
+def build_request(incident, candidates, incident_state, fixtures, target):
+    return PlanRequest(
+        incident=dict(incident),
+        candidates=tuple({
+            "change_id": c.change_id, "branch": c.branch, "summary": c.summary,
+            "lines_changed": c.lines_changed, "files_changed": c.files_changed,
+        } for c in candidates),
+        intervention_surfaces=tuple(sorted(incident_state)),
+        incident_state=dict(incident_state),
+        fixtures=tuple(fixtures),
+        failure_factor=verdict.FAILURE_FACTOR,
+        recovery_factor=verdict.RECOVERY_FACTOR,
+        target_hypothesis=target,
+    )
+
+
+def plan_experiment(request: PlanRequest, provider) -> PlanOutcome:
+    """Ask a provider for an experiment; fall back if anything at all goes wrong.
+
+    "Anything at all" is deliberate: no key, no network, a timeout, malformed
+    JSON and a rejected plan all land in the same place.
+    """
+    reason = ""
+    asked = getattr(provider, "name", "unknown")
+    try:
+        raw = provider.propose(request, PLAN_SCHEMA)
+        report = validate(raw, request)
+        if report.accepted:
+            return PlanOutcome(plan=report.plan, report=report,
+                               source=provider.name,
+                               kind=getattr(provider, "kind", "unknown"),
+                               proposed_by=asked)
+        reason = ("the validator rejected the plan: %s"
+                  % "; ".join(c.name for c in report.rejections))
+    except ProviderUnavailable as exc:
+        reason = str(exc)
+    except Exception as exc:                       # noqa: BLE001 - never fatal
+        reason = "%s: %s" % (type(exc).__name__, exc)
+
+    fallback = DeterministicPlanner()
+    report = validate(fallback.propose(request), request)
+    if not report.accepted:                        # would be a bug in our own planner
+        raise RuntimeError("the deterministic fallback produced an invalid plan: %s"
+                           % [c.detail for c in report.rejections])
+    return PlanOutcome(plan=report.plan, report=report, source=fallback.name,
+                       kind=fallback.kind, proposed_by=asked,
+                       fallback_reason=reason)
+
+
+def default_provider(offline: bool = False):
+    """Gemini arrives in Milestone 4. Until then there is one planner, and the
+    UI is told exactly which one it is."""
+    return DeterministicPlanner()
+
+
+def phases_for(plan: ExperimentPlan, incident_state):
+    """Turn an accepted plan into the phases the engine will run.
+
+    Note what does and does not cross this boundary: the plan contributes which
+    candidate to remove and which fixture to replay. The seven phases, the
+    controls and every comparison are constructed by causeway.verdict, so a
+    planner cannot move its own goalposts - and there are no goalposts to move,
+    because the reference is measured during the run.
+    """
+    return verdict.plan_phases(plan.hypothesis_id, incident_state, plan.fixture_id)

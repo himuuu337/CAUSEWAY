@@ -1,489 +1,201 @@
-# 🌉 Causeway — AI-Powered Causal Root Cause Analysis
+# Causeway
 
-> **AI proposes. Code validates. Measurements decide.** ⚡
+**Experimental root-cause verification.**
 
-Causeway is an **AI-powered incident investigation system** that goes beyond simply guessing the root cause of a production incident.
+Most root-cause tools analyse telemetry and rank likely causes. Causeway takes
+the next step: it turns a suspected cause into a testable hypothesis, designs a
+controlled experiment, runs it in an isolated sandbox against the same replayed
+workload, and lets the measurement decide.
 
-Instead of saying *“Deployment B probably caused the problem,”* Causeway **tests the hypothesis through controlled experiments**, replays the incident, measures the system's behavior, and determines whether the suspected change actually caused the failure.
+    AI PROPOSES.  CODE VALIDATES.  SYSTEM EXPERIMENTS.  MEASUREMENTS DECIDE.
 
----
+A language model may propose a hypothesis and design an experiment. It may
+never decide whether a candidate is the cause. That is not a promise in a
+comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
+the module that produces the verdict and fails the build if anything
+model-shaped, networked or planner-shaped becomes reachable from it.
 
-## ✨ Key Features
+## Status: Milestone 1
 
-### 🚨 1. Incident Detection
-
-Detects abnormal application behavior such as sudden increases in API latency.
-
-```text
-Normal latency  →  20 ms
-Incident latency → 330 ms 🚨
-```
-
----
-
-### 🔍 2. Candidate Localization
-
-Analyzes recent deployments and identifies changes that could be responsible for the incident.
-
-```text
-Deployment A
-🟡 9 files changed
-🟡 412 lines changed
-
-Deployment B
-🔴 1 file changed
-🔴 3 lines changed
-```
-
-Causeway doesn't assume that the biggest or most suspicious change is the actual cause.
-
----
-
-### 🤖 3. AI-Powered Experiment Planning
-
-Gemini analyzes the incident and candidate changes to create a **testable hypothesis** and experiment plan.
-
-Instead of asking:
-
-> ❌ "What caused this incident?"
-
-Causeway asks:
-
-> ✅ "What experiment can prove or disprove this hypothesis?"
-
----
-
-### 🛡️ 4. Experiment Validation
-
-AI-generated experiments are passed through a deterministic validator before execution.
-
-```text
-🤖 Gemini
-    ↓
-📋 Experiment Plan
-    ↓
-🛡️ Validator
-    ↓
-✅ Safe & Valid?
-    ↓
-🧪 Execute
-```
-
-This prevents the AI from directly performing unsafe or invalid actions.
-
----
-
-### 🧪 5. Controlled Sandbox Experiments
-
-Experiments are performed in an isolated environment rather than directly affecting production.
-
-This allows Causeway to safely test hypotheses without disrupting real users.
-
----
-
-### 🔄 6. Incident Replay
-
-Causeway replays the **same workload** during experiments.
-
-```text
-Original Incident
-       ↓
-📦 Capture Workload
-       ↓
-🔁 Replay
-       ↓
-🧪 Experiment
-```
-
-Using the same workload makes the comparison more reliable because the tested variable is changed while other conditions remain as consistent as possible.
-
----
-
-### ⚡ 7. Candidate Ablation
-
-Causeway temporarily removes the suspected change and observes what happens.
-
-Example:
-
-```text
-B = ON
-   ↓
-🐌 333 ms
-
-B = OFF
-   ↓
-⚡ 21 ms
-```
-
-If removing B makes the system recover, B becomes a strong causal candidate.
-
----
-
-### 🔁 8. Restore Testing
-
-Causeway then restores the suspected change.
-
-```text
-B ON  → 🐌 333 ms
-B OFF → ⚡ 21 ms
-B ON  → 🐌 331 ms
-```
-
-If the failure returns after restoration, the evidence for causality becomes significantly stronger.
-
----
-
-### 📊 9. Performance Measurement
-
-Causeway measures system performance before, during, and after experiments.
-
-It also uses repeated measurements to reduce the influence of random performance fluctuations.
-
-```text
-Control      → 23 ms
-Reproduce    → 333 ms 🚨
-Ablation     → 21 ms  ⚡
-Restore      → 331 ms 🚨
-```
-
----
-
-### 🎯 10. Causal Verdicts
-
-Causeway classifies hypotheses based on experimental evidence.
-
-| Verdict          | Meaning                                                                           |
-| ---------------- | --------------------------------------------------------------------------------- |
-| 🟢 **PROVEN**    | Removing the candidate fixes the failure and restoring it brings the failure back |
-| 🔴 **REFUTED**   | Removing the candidate does not eliminate the failure                             |
-| 🟡 **SUPPORTED** | Evidence points toward the candidate, but is not strong enough for a full proof   |
-| ⚪ **UNRESOLVED** | Measurements are too unstable or ambiguous to reach a reliable conclusion         |
-
----
-
-# ⚙️ How Causeway Works
-
-Causeway follows a complete **observe → reason → experiment → verify** pipeline.
-
-```text
-🚨 PRODUCTION INCIDENT
-          │
-          ▼
-📡 COLLECT TELEMETRY
- Logs • Metrics • Traces
-          │
-          ▼
-🔍 LOCALIZE CANDIDATES
- Recent Deployments
-          │
-          ▼
-🤖 GEMINI
- Generate Hypothesis
- + Experiment Plan
-          │
-          ▼
-🛡️ VALIDATOR
- Check Experiment
-          │
-          ▼
-🧪 SANDBOX
-          │
-          ▼
-🔁 REPLAY INCIDENT
-          │
-          ▼
-✂️ ABLATE CANDIDATE
-          │
-          ▼
-📊 MEASURE
-          │
-          ▼
-🔄 RESTORE CANDIDATE
-          │
-          ▼
-📊 MEASURE AGAIN
-          │
-          ▼
-🎯 CAUSAL VERDICT
-```
-
----
-
-# 🧠 The Core Concept
-
-Traditional Root Cause Analysis often looks like:
-
-```text
-📡 Logs + Metrics
-       ↓
-      🤖 AI
-       ↓
-"Probably Deployment B"
-```
-
-Causeway takes a different approach:
-
-```text
-📡 Evidence
-    ↓
-🤖 AI Hypothesis
-    ↓
-🧪 Controlled Experiment
-    ↓
-📊 Real Measurements
-    ↓
-🎯 Causal Verdict
-```
-
-The AI **doesn't get to decide the answer**.
-
-It proposes what should be tested.
-
-The system then tests that hypothesis against actual behavior.
-
----
-
-# 🔬 Example: Finding the Real Culprit
-
-Imagine two deployments happened shortly before an incident.
-
-### Deployment A
-
-```text
-📦 refactor/order-query-batching
-9 files
-412 lines changed
-```
-
-### Deployment B
-
-```text
-📦 perf/normalise-audit-predicate
-1 file
-3 lines changed
-```
-
-The incident:
-
-```text
-🚨 Order API p95 latency
-
-20 ms → 330 ms
-```
-
-A simple correlation-based system might rank **A** higher because it is a larger and more significant-looking change.
-
-Causeway doesn't stop there.
-
-### 🧪 Test A
-
-```text
-A = OFF
-B = ON
-
-Latency → 316 ms
-```
-
-The incident remains.
-
-```text
-A removed
-     ↓
-Failure remains
-     ↓
-❌ A REFUTED
-```
-
-### 🧪 Test B
-
-```text
-A = ON
-B = OFF
-
-Latency → 21 ms ⚡
-```
-
-The system recovers.
-
-Now restore B:
-
-```text
-A = ON
-B = ON
-
-Latency → 331 ms 🚨
-```
-
-The failure returns.
-
-```text
-B ON
- ↓
-🐌 SLOW
-
-B OFF
- ↓
-⚡ FAST
-
-B ON
- ↓
-🐌 SLOW
-```
-
-### 🎯 Result
-
-```text
-A → ❌ REFUTED
-B → 🟢 PROVEN
-```
-
-A large change was innocent.
-
-A tiny **3-line change** was responsible.
-
-That's the problem Causeway is designed to solve.
-
----
-
-# 🤖 What Does Gemini Do?
-
-Gemini acts as the **reasoning layer**.
-
-It can:
-
-* 🧠 Analyze incident evidence
-* 🔎 Examine candidate changes
-* 💡 Generate hypotheses
-* 🧪 Design controlled experiments
-* 📝 Produce structured experiment specifications
-* 🔧 Propose potential fixes
-
-But Gemini **does not determine the final causal verdict**.
-
-The architecture is:
-
-```text
-🤖 AI PROPOSES
-       ↓
-🛡️ CODE VALIDATES
-       ↓
-🧪 SYSTEM EXPERIMENTS
-       ↓
-📊 MEASUREMENTS DECIDE
-```
-
----
-
-# 🏗️ System Architecture
-
-Causeway can be viewed as three major layers:
-
-### 📡 Layer 1 — OBSERVE
-
-```text
-Logs
-Metrics
-Traces
-Deployments
-Database Activity
-```
-
-**Question:**
-
-> What's happening?
-
----
-
-### 🧠 Layer 2 — REASON
-
-```text
-Gemini
-   ↓
-Hypotheses
-   ↓
-Experiment Plans
-```
-
-**Question:**
-
-> What could explain the incident, and how can we test it?
-
----
-
-### 🧪 Layer 3 — VERIFY
-
-```text
-Sandbox
-   ↓
-Intervention
-   ↓
-Replay
-   ↓
-Measurement
-   ↓
-Verdict
-```
-
-**Question:**
-
-> Does reality agree with the hypothesis?
-
----
-
-# 🌟 Why Causeway?
-
-Most incident investigation systems focus on **correlation**.
-
-Causeway focuses on **causal verification**.
-
-Instead of:
-
-> "This deployment happened before the incident."
-
-Causeway asks:
-
-> "What happens if we remove this deployment while keeping everything else as controlled as possible?"
-
-That distinction turns an **AI-generated guess** into an **experimentally supported explanation**.
-
----
-
-# 🚀 Vision
-
-The long-term vision for Causeway extends beyond identifying the root cause.
-
-```text
-🚨 INCIDENT
-     ↓
-🔍 INVESTIGATE
-     ↓
-🎯 VERIFY ROOT CAUSE
-     ↓
-🤖 GENERATE FIX
-     ↓
-🧪 APPLY FIX IN SANDBOX
-     ↓
-🔁 REPLAY INCIDENT
-     ↓
-📊 VERIFY RECOVERY
-     ↓
-👤 HUMAN REVIEW
-     ↓
-🚀 PRODUCTION
-```
-
-The goal is an intelligent incident-response system that can **investigate, experiment, generate fixes, and verify those fixes** while keeping humans in control of production changes.
-
----
-
-## 💡 Core Philosophy
-
-> **Don't just guess the root cause. Test it.**
-
-### 🌉 Causeway
-
-**From correlation → to causation.**
-**From AI guesses → to experimental evidence.**
-**From incident detection → to verified resolution.**
-
----
+The deterministic causal core, verified from the command line. No UI yet, no
+Gemini yet, both on purpose.
+
+| | |
+|---|---|
+| Milestone 1 | causal core, CLI-verified · **done** |
+| Milestone 2 | API + SSE + frontend shell |
+| Milestone 3 | the investigation dashboard |
+| Milestone 4 | Gemini planner behind the existing validator |
+| Milestone 5 | fix generation and fix verification (stretch) |
+
+## Quick start
+
+Python 3.10+. No third-party dependencies at this milestone.
+
+    cd backend
+    python -m causeway.cli seed          # size the sandbox to this machine
+    python -m causeway.cli investigate   # run the full investigation
+    python -m causeway.cli events        # the same run as raw NDJSON
+    python -m unittest discover -s tests -t . -v
+
+## The demo incident
+
+Two changes shipped to `order-service` inside the same fifteen-minute window,
+both perfectly correlated with a latency regression.
+
+| | Change | Diff | Effect |
+|---|---|---|---|
+| **A** | `refactor/order-query-batching` | 9 files, 412 lines | none - the decoy |
+| **B** | `perf/normalise-audit-predicate` | 1 file, 3 lines | the actual cause |
+
+B wraps `order_id` in an expression inside the audit predicate, which makes the
+index on `order_audit(order_id)` unusable and turns every lookup into a full
+table scan. A is a large, alarming-looking refactor that issues exactly the
+same queries as the code it replaced.
+
+Every observational signal points at A. Only an experiment separates them.
+
+## Observational ranking, and what it is
+
+`causeway/observational.py` ranks candidates the way an approach with only
+correlational evidence must: same service, how recently it shipped, how large
+the diff is, how much of the slow code path it touched. On this incident it
+computes
+
+    A  0.961    B  0.567
+
+and confidently names the decoy. Those numbers are computed from the deploy
+record by a real weighted formula, not written down - `test_observational.py`
+asserts them.
+
+**This is a stand-in for that class of reasoning, built for this controlled
+demo. It is not a model of any commercial product, and no claim is made that
+real tools use this arithmetic.** It gets the answer wrong for the honest
+reason: a three-line change caused the outage and a 412-line change did not,
+and no amount of correlational evidence can tell those two apart.
+
+It is also blind by construction. It cannot import the sandbox, the replay,
+the measurements or the verdict, and a test enforces that.
+
+## Where the model is allowed to sit
+
+    localizer  ->  PLANNER  ->  validator  ->  sandbox  ->  measure  ->  verdict
+    (code)         (model)      (code)        (code)      (code)      (code)
+
+A planner receives the incident, the candidates, the available interventions
+and the available fixtures. It returns one `ExperimentSpec` and nothing else.
+It is given no measurement, it is called before anything runs, and its output
+passes eight deterministic checks before the sandbox will touch it:
+
+| Check | Rejects |
+|---|---|
+| `schema` | missing or unexpected fields, a smuggled `verdict` key, a pinned absolute threshold |
+| `hypothesis_in_candidates` | a change the localizer never surfaced |
+| `intervention_surface_exists` | an intervention the sandbox cannot make |
+| `single_independent_variable` | moving more than one flag, or a no-op |
+| `fixture_exists` | a fabricated replay |
+| `discriminates_between_two` | an experiment that separates nothing |
+| `expected_signature_wellformed` | a metric, comparison or factor of its own choosing |
+| `no_encoded_verdict` | a conclusion in any field the engine reads |
+
+`reasoning_summary` is presentation only. It is quoted on screen and never read
+by the engine; if it contains verdict language it is flagged as such, and a
+test proves prose claiming "B is PROVEN" leaves the computed verdict untouched.
+
+Any failure - no key, no network, a timeout, malformed JSON, a rejected plan -
+falls through to the deterministic planner, which emits the same shape and goes
+through the same validator. Every plan carries its provenance, and the
+interface must show it. **Claiming AI designed an experiment the fallback
+designed would be the one dishonest thing Causeway could do.**
+
+## The controlled experiment
+
+Each hypothesis runs seven phases. Every phase that carries evidence has a
+healthy control measured immediately before it and immediately after it:
+
+| Phase | State | Expectation |
+|---|---|---|
+| `control-1` | every candidate off | what healthy costs, right now |
+| `reproduce` | incident state | failure present |
+| `control-2` | every candidate off | healthy again |
+| `ablate` | one candidate removed, everything else fixed | failure absent |
+| `control-3` | every candidate off | the ablation is now bracketed both sides |
+| `restore` | the candidate put back | failure returns |
+| `control-4` | every candidate off | healthy one last time |
+
+Every judgement is a ratio against **the median of the two controls beside that
+phase**. The failure counts as present at `>= 4x` its local control and gone at
+`<= 2.5x`, with a 5 ms noise floor applied in both directions.
+
+| condition | verdict |
+|---|---|
+| failure reproduced, removal recovers, restoring brings it back | `PROVEN` |
+| the failure survives the removal | `REFUTED` |
+| removal recovers but the recurrence cannot be established | `SUPPORTED` |
+| the incident never reproduced, the ablation landed between recovery and failure, or the controls beside a phase disagree by more than 3x | `UNRESOLVED` |
+
+### Why the controls are interleaved
+
+Measuring one control at the start of a run and one at the end sounds
+sufficient and is not. A run long enough to reproduce an incident three times
+is long enough for a laptop to genuinely change speed - thermal limits, a
+scanner waking, the page cache filling. A start-to-end guard charges all of
+that drift against every phase at once and abstains on perfectly good
+experiments.
+
+Interleaving makes drift local. The machine is allowed to move over the run;
+what it may not do is move *between a phase and the controls either side of
+it*. `test_verdict.py` pins a run whose controls drift 4.8x end to end and
+whose verdict is still `PROVEN`, and asserts every verdict is unchanged when
+each measurement is scaled from 0.05x to 100x.
+
+### Why nothing is measured only once
+
+p95 over a few dozen requests is a tail statistic - at n=40 it is the
+second-slowest request in the replay. One antivirus scan lands squarely in that
+tail. Every phase is therefore replayed three times and its number is the
+median of those repetitions. That makes the *estimator* robust; it does not
+change what a measurement has to clear, so it cannot influence a verdict.
+
+## Sizing, not hardcoding
+
+`python -m causeway.cli seed` measures this machine and sizes the audit table
+so the incident lands around 14x healthy - unmistakable, and fast enough that a
+full investigation finishes while someone is watching. How many rows that takes
+depends on the disk, the cache and the antivirus, so it is measured rather than
+inherited from somebody else's laptop.
+
+Nothing recorded at seed time reaches a verdict. Those numbers are setup
+diagnostics; every experiment measures its own controls while it runs.
+
+## Scope boundary
+
+The intervention is real: exactly one variable moves, every other flag is held
+fixed, the workload is byte-identical between phases, and the database is
+restored between them. What is simulated is the *deployment mechanism* - a
+candidate change is a runtime flag rather than a rebuild from a reverted
+commit. Worth saying out loud rather than letting someone find it.
+
+## Layout
+
+    backend/
+      causeway/
+        verdict.py          THE VERDICT - no model may be reachable from here
+        measurement.py      p50/p95, and the median across repetitions
+        incident.py         the incident and the deploy record (data)
+        localizer.py        deterministic candidate filtering
+        observational.py    the correlation-only baseline - structurally blind
+        planner/
+          schema.py         ExperimentSpec and the JSON schema
+          validator.py      the eight deterministic checks
+          deterministic.py  the fallback planner
+        sandbox/
+          seed.py           deterministic database builder + calibration
+          service.py        the demo order-service (its own process)
+          replay.py         deterministic fixture replay
+          runner.py         lifecycle: restore, set flags, replay, repeat
+        orchestrator.py     the investigation, as a stream of events
+        cli.py              milestone 1 entry point
+      tests/
+      fixtures/             recorded traffic (portable, in git)
+      .data/                this machine's database and calibration (not in git)
