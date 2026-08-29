@@ -15,7 +15,7 @@ import os
 import sys
 import textwrap
 
-from causeway import config, verdict
+from causeway import config, fix_verdict, verdict
 from causeway.sandbox import seed as seedmod
 from causeway.sandbox.replay import build_fixture, save_fixture
 from causeway.orchestrator import investigate
@@ -121,6 +121,9 @@ def cmd_seed(args) -> int:
 
 _VERDICT_COLOUR = {verdict.PROVEN: "green", verdict.REFUTED: "red",
                    verdict.SUPPORTED: "cyan", verdict.UNRESOLVED: "yellow"}
+
+_FIX_VERDICT_COLOUR = {fix_verdict.VERIFIED: "green", fix_verdict.FAILED: "red",
+                       fix_verdict.UNRESOLVED: "yellow"}
 
 _STATE_MARK = {"broken": "BROKEN", "healthy": "HEALTHY",
                "inconclusive": "INCONCLUSIVE", "unstable": "UNSTABLE"}
@@ -282,6 +285,53 @@ def cmd_investigate(args) -> int:
                 status = 3
             print(style.dim("   completed in %.1fs" % event["elapsed_s"]))
             print("=" * WIDTH)
+
+        elif kind == "root_cause_proven":
+            _rule(style.bold(" [6] VERIFIED FIX LOOP  %s" % event["hypothesis"])
+                  + style.dim("   only for a PROVEN cause"))
+
+        elif kind == "fix_plan":
+            prov, fix = event["provenance"], event["fix"]
+            if prov["used_fallback"]:
+                label = "DETERMINISTIC FALLBACK"
+            elif prov["kind"] == "gemini":
+                label = "GEMINI (%s)" % prov["source"].replace("gemini:", "")
+            else:
+                label = "DETERMINISTIC PLANNER"
+            print("   fix designed by %s" % style.cyan(style.bold(label)))
+            print("   summary         %s" % fix["summary"])
+            op = fix["operation"]
+            print("   change          %s: %r -> %r" % (op["target"], op["before"], op["after"]))
+
+        elif kind == "fix_validation":
+            mark = style.green(style.bold("%d/%d PASSED" % (event["passed"], event["total"])))
+            print("   fix validator   %s" % mark)
+
+        elif kind == "fix_apply":
+            print(style.dim("   applying %s to a disposable sandbox copy - the "
+                            "real source tree is never touched" % event["hypothesis"]))
+
+        elif kind == "fix_phase_result":
+            print("     %-14s %9.2f ms%s"
+                  % (event["phase"], event["p95_ms"],
+                     style.dim("   control") if event["role"] == "control" else ""))
+
+        elif kind == "fix_phase_judged":
+            paint = style.green if event["state"] == "healthy" else (
+                style.red if event["state"] == "broken" else style.yellow)
+            print(style.dim("       -> %s") % event["phase"]
+                  + "  %s" % paint(style.bold(_STATE_MARK.get(event["state"], "?")))
+                  + style.dim("  %.1fx its local control of %.2f ms"
+                              % (event["ratio"], event["local_control_ms"])))
+
+        elif kind == "fix_verdict":
+            paint = getattr(style, _FIX_VERDICT_COLOUR.get(event["verdict"], "yellow"))
+            print("     %s %s  %s" % (style.dim("FIX VERDICT"),
+                                      style.bold(event["hypothesis"]),
+                                      style.bold(paint(event["verdict"]))))
+            _wrap(event["reason"], "        ")
+            print(style.dim("   verified in sandbox only - human review required "
+                            "before any real deployment"))
 
     return status
 

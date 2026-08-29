@@ -9,8 +9,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  Assessment, Candidate, CausewayEvent, Exclusion, Health, Plan,
-  Provenance, RunState, Validation, Verdict,
+  Assessment, Candidate, CausewayEvent, Exclusion, Fix, FixOperation,
+  FixVerdict, Health, Plan, Provenance, RunState, Validation, Verdict,
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
@@ -43,6 +43,35 @@ export interface HypothesisView {
   reason?: string
 }
 
+/** The fix loop's own phase row - same shape as PhaseRow, kept separate so a
+ * causal phase and a fix phase are never accidentally interchangeable. */
+export interface FixPhaseRow {
+  phase: string
+  role: 'control' | 'evidence'
+  p95_ms?: number
+  p50_ms?: number
+  reps?: number
+  state?: string
+  ratio?: number | null
+  localControlMs?: number
+  drift?: number
+  running: boolean
+}
+
+export interface FixView {
+  hypothesis: string
+  causalVerdict?: Verdict
+  fix?: Fix
+  provenance?: Provenance
+  validation?: Validation
+  operation?: FixOperation
+  applySummary?: string
+  started: boolean
+  phases: FixPhaseRow[]
+  verdict?: FixVerdict
+  reason?: string
+}
+
 export interface PipelineStage {
   key: string
   label: string
@@ -68,6 +97,9 @@ export interface InvestigationState {
   order: string[]
   activeHypothesis: string | null
   conclusion?: Extract<CausewayEvent, { type: 'conclusion' }>
+  fixes: Record<string, FixView>
+  fixOrder: string[]
+  activeFix: string | null
   events: CausewayEvent[]
 }
 
@@ -85,6 +117,9 @@ const EMPTY: InvestigationState = {
   hypotheses: {},
   order: [],
   activeHypothesis: null,
+  fixes: {},
+  fixOrder: [],
+  activeFix: null,
   events: [],
 }
 
@@ -94,6 +129,15 @@ function ensure(state: InvestigationState, id: string): HypothesisView {
 
 function withPhases(view: HypothesisView, phase: string,
                     change: (row: PhaseRow) => PhaseRow): HypothesisView {
+  return { ...view, phases: view.phases.map((row) => row.phase === phase ? change(row) : row) }
+}
+
+function ensureFix(state: InvestigationState, hypothesis: string): FixView {
+  return state.fixes[hypothesis] ?? { hypothesis, phases: [], started: false }
+}
+
+function withFixPhases(view: FixView, phase: string,
+                       change: (row: FixPhaseRow) => FixPhaseRow): FixView {
   return { ...view, phases: view.phases.map((row) => row.phase === phase ? change(row) : row) }
 }
 
@@ -208,6 +252,107 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
     case 'conclusion':
       next.conclusion = event
       next.activeHypothesis = null
+      return next
+
+    case 'root_cause_proven': {
+      const view: FixView = { ...ensureFix(state, event.hypothesis), causalVerdict: event.verdict }
+      next.fixes = { ...state.fixes, [event.hypothesis]: view }
+      next.fixOrder = state.fixOrder.includes(event.hypothesis)
+        ? state.fixOrder
+        : [...state.fixOrder, event.hypothesis]
+      return next
+    }
+
+    case 'fix_plan': {
+      const view: FixView = {
+        ...ensureFix(state, event.hypothesis),
+        fix: event.fix,
+        provenance: event.provenance,
+      }
+      next.fixes = { ...state.fixes, [event.hypothesis]: view }
+      return next
+    }
+
+    case 'fix_validation': {
+      const { checks, passed, total, accepted, reasoning_flagged } = event
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: {
+          ...ensureFix(state, event.hypothesis),
+          validation: { checks, passed, total, accepted, reasoning_flagged },
+        },
+      }
+      return next
+    }
+
+    case 'fix_apply':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: {
+          ...ensureFix(state, event.hypothesis),
+          operation: event.operation,
+          applySummary: event.summary,
+        },
+      }
+      return next
+
+    case 'fix_experiment_start': {
+      const view: FixView = {
+        ...ensureFix(state, event.hypothesis),
+        started: true,
+        operation: event.operation,
+        phases: event.phases.map((phase) => ({
+          phase,
+          role: phase.indexOf('control') >= 0 ? ('control' as const) : ('evidence' as const),
+          running: false,
+        })),
+      }
+      next.fixes = { ...state.fixes, [event.hypothesis]: view }
+      next.activeFix = event.hypothesis
+      return next
+    }
+
+    case 'fix_phase_start':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: withFixPhases(ensureFix(state, event.hypothesis), event.phase,
+          (row) => ({ ...row, running: true })),
+      }
+      next.activeFix = event.hypothesis
+      return next
+
+    case 'fix_phase_result':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: withFixPhases(ensureFix(state, event.hypothesis), event.phase,
+          (row) => ({
+            ...row, running: false, role: event.role,
+            p95_ms: event.p95_ms, p50_ms: event.p50_ms, reps: event.reps,
+          })),
+      }
+      return next
+
+    case 'fix_phase_judged':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: withFixPhases(ensureFix(state, event.hypothesis), event.phase,
+          (row) => ({
+            ...row, state: event.state, ratio: event.ratio,
+            localControlMs: event.local_control_ms, drift: event.drift,
+          })),
+      }
+      return next
+
+    case 'fix_verdict':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: {
+          ...ensureFix(state, event.hypothesis),
+          verdict: event.verdict,
+          reason: event.reason,
+        },
+      }
+      next.activeFix = null
       return next
 
     case 'error':

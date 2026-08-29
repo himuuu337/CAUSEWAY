@@ -13,6 +13,7 @@ import Candidates from './components/Candidates'
 import PlanPanel from './components/PlanPanel'
 import ExperimentPanel from './components/ExperimentPanel'
 import Conclusion from './components/Conclusion'
+import FixPanel from './components/FixPanel'
 import Roadmap from './components/Roadmap'
 import EventFeed from './components/EventFeed'
 import type { HypothesisView } from './useInvestigation'
@@ -102,7 +103,18 @@ export default function App() {
         />
       )}
 
-      <Roadmap causeVerified={(state.conclusion?.proven.length ?? 0) > 0} />
+      {state.fixOrder.length > 0 && (
+        <h2 className="section-title">Verified fix</h2>
+      )}
+      {state.fixOrder.map((id) => (
+        <FixPanel
+          key={id}
+          view={state.fixes[id]}
+          candidate={state.candidates.find((c) => c.change_id === id)}
+        />
+      ))}
+
+      <Roadmap />
 
       <EventFeed events={state.events} />
     </div>

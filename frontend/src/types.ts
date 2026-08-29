@@ -8,6 +8,7 @@
  */
 
 export type Verdict = 'PROVEN' | 'REFUTED' | 'SUPPORTED' | 'UNRESOLVED'
+export type FixVerdict = 'VERIFIED' | 'FAILED' | 'UNRESOLVED'
 export type PhaseState = 'broken' | 'healthy' | 'inconclusive' | 'unstable'
 
 export interface Candidate {
@@ -74,6 +75,21 @@ export interface Validation {
   reasoning_flagged: boolean
 }
 
+/** A proposed fix, only ever requested for a hypothesis already PROVEN. */
+export interface FixOperation {
+  type: string
+  target: string
+  before: string
+  after: string
+}
+
+export interface Fix {
+  hypothesis_id: string
+  summary: string
+  operation: FixOperation
+  reasoning_summary: string
+}
+
 export type CausewayEvent =
   | { type: 'stage'; stage: string; status: 'running' | 'done'; t: number }
   | {
@@ -111,6 +127,25 @@ export type CausewayEvent =
       correlation_selected_decoy: boolean
       elapsed_s: number
     }
+  | { type: 'root_cause_proven'; hypothesis: string; verdict: Verdict }
+  | ({ type: 'fix_plan'; hypothesis: string; fix: Fix; validation: Validation; provenance: Provenance })
+  | ({ type: 'fix_validation'; hypothesis: string } & Validation)
+  | { type: 'fix_apply'; hypothesis: string; summary: string; operation: FixOperation }
+  | { type: 'fix_experiment_start'; hypothesis: string; phases: string[]; operation: FixOperation }
+  | { type: 'fix_phase_start'; hypothesis: string; phase: string; flags: Record<string, boolean> }
+  | { type: 'fix_phase_result'; hypothesis: string; phase: string; role: 'control' | 'evidence'; p95_ms: number; p50_ms: number; reps: number; error_rate: number }
+  | {
+      type: 'fix_phase_judged'
+      hypothesis: string
+      phase: string
+      state: PhaseState
+      p95_ms: number
+      local_control_ms: number
+      ratio: number | null
+      controls_agree: boolean
+      drift: number
+    }
+  | { type: 'fix_verdict'; hypothesis: string; verdict: FixVerdict; reason: string; phases: unknown[] }
   | { type: 'done'; elapsed_s: number }
   | { type: 'error'; message: string }
   | { type: 'end'; run_id: string; state: RunState; error: string; event_count: number; elapsed_s: number }

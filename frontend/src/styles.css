@@ -368,6 +368,42 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .chain-step .v { margin-top: 4px; }
 .chain-link { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1.9; }
 
+/* -------------------------------------------------------------- fix loop */
+
+.fix-card { border-color: var(--violet); }
+.fix-chain { display: flex; flex-direction: column; }
+.fix-chain-step { border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); padding: 10px 14px; font-size: 13px; }
+.fix-chain-step .k { font: 11px/1 var(--mono); color: var(--text-faint); letter-spacing: 0.08em; }
+.fix-chain-step .v { margin-top: 4px; }
+.fix-chain-link { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1.9; }
+
+.patch-review {
+  margin-top: 13px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--bg-deep); overflow: hidden;
+}
+.patch-label {
+  padding: 7px 12px; font: 11px/1 var(--mono); color: var(--text-faint);
+  letter-spacing: 0.04em; border-bottom: 1px solid var(--line);
+}
+.patch-lines { padding: 4px 0; }
+.patch-line {
+  padding: 4px 12px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
+}
+.patch-line.before { color: #ffb3ae; background: var(--red-bg); }
+.patch-line.after { color: #b8f0bd; background: var(--green-bg); }
+
+.fix-stages { grid-template-columns: 1fr 46px 1fr; }
+
+.verdict-pill.fix-VERIFIED { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.verdict-pill.fix-FAILED { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+.verdict-pill.fix-UNRESOLVED { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+
+.sandbox-notice {
+  margin-top: 14px; padding: 10px 13px; border-radius: var(--radius);
+  border: 1px solid var(--violet); background: var(--violet-bg); color: var(--violet);
+  font: 11px/1.5 var(--mono); letter-spacing: 0.02em;
+}
+
 /* ------------------------------------------------------------------- roadmap */
 
 .roadmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }

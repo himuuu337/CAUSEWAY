@@ -40,13 +40,18 @@ def free_port(start: int = 8801, attempts: int = 60) -> int:
 
 class Sandbox:
     def __init__(self, template_db: str, work_db: str, port: int = None,
-                 repo_root: str = None):
+                 repo_root: str = None, service_path: str = None):
         self.template_db = template_db
         self.work_db = work_db
         self.port = port or free_port()
         self.host = "127.0.0.1"
         self.repo_root = repo_root or os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # None runs the real `causeway.sandbox.service` module, exactly as
+        # before. A path here (Milestone 5's fix loop) runs a disposable,
+        # already-patched COPY of it instead - the developer's checkout is
+        # never the thing this process executes.
+        self.service_path = service_path
         self._process = None
         self._template_print = None
         self.restores_copied = 0
@@ -55,9 +60,11 @@ class Sandbox:
     # -- lifecycle ---------------------------------------------------------
     def start(self, timeout: float = 25.0):
         self.restore()
+        launch = ([sys.executable, "-m", "causeway.sandbox.service"]
+                  if self.service_path is None
+                  else [sys.executable, self.service_path])
         self._process = subprocess.Popen(
-            [sys.executable, "-m", "causeway.sandbox.service",
-             "--db", self.work_db, "--port", str(self.port)],
+            launch + ["--db", self.work_db, "--port", str(self.port)],
             cwd=self.repo_root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
