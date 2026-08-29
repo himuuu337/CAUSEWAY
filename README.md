@@ -447,7 +447,7 @@ rewritten, and never replaced by what a model would have preferred.
 |---|---|
 | `diagnose_only` | experiments run; **no persistent fix is planned, proposed or applied** |
 | `diagnose_and_fix` | a fix may be proposed for a PROVEN cause, and must verify before it is claimed |
-| `requested_change` | recorded as a change request; this prototype diagnoses and does not implement it |
+| `requested_change` | Gemini proposes a real patch for the change you described; validated, applied to a disposable copy, and checked (see below) |
 | `needs_clarification` | the instruction was ambiguous — Causeway asks, and clones nothing |
 
 A diagnostic intervention is not a fix. An experiment edits a disposable copy
@@ -577,6 +577,121 @@ incident; the other is on a six-row lookup table and costs nothing. No
 detector can tell them apart, because statically they are the same. The
 experiment settles it — and that is the whole product in one screen.
 
+## Standard repository analysis — causeway.json is optional
+
+`causeway.json` is required for exactly one thing: the controlled causal
+experiment described above, which needs a repeatable workload and a database
+built from the repository's own schema to measure anything against. It is
+**not** required to read a repository, propose a change, and check it — a
+normal public repository that never heard of Causeway's contract still gets
+a real investigation, not a rejection.
+
+    GitHub URL + your instruction
+      -> validate -> clone (disposable, isolated workspace)
+      -> causeway.json present?  yes -> the causal-experiment path above
+                                 no  -> language(s) detected
+                                        (causeway.languages - file signals
+                                        only, nothing is ever executed to
+                                        detect it)
+      -> a bounded, instruction-scored selection of the repository's own
+         source (never the whole tree)
+      -> Gemini proposes a CodePatch (or the narrow deterministic fallback
+         does, for the one instruction shape it recognises)
+      -> the same deterministic causeway.patch.validator every requested
+         change goes through: relative paths, no traversal, resolved and
+         proven inside the workspace, must be both analysable and declared
+         patchable, never .git/.env/anything credential-shaped, before-text
+         must match the file exactly as it stands, bounded file/hunk counts,
+         every enforceable constraint from your instruction
+      -> applied to a disposable copy - never the clone
+      -> whatever CHEAP, NON-EXECUTING check that file's own language can
+         safely run
+      -> VERIFIED, FAILED, or IMPLEMENTED — VERIFICATION INCOMPLETE
+
+**Causeway's standard repository analysis uses a language-adapter
+architecture. It currently recognizes Python, JavaScript, TypeScript, Java,
+Go, C and C++ repositories (C# and Rust are detected but not yet verified).
+Gemini proposes source-level changes from bounded repository context, while
+deterministic code validates and applies patches only in a disposable
+workspace. Full behavioral verification depends on the repository exposing a
+trusted runnable verification surface.**
+
+That last sentence is the honest limit of this path, stated plainly: a
+compile or syntax check is not proof a program behaves correctly, and this
+path never claims it is. `causeway/standard_investigation.py` reports
+`VERIFIED` **never** — only a `causeway.json` repository's real HTTP probes
+(`causeway/requested_change.py`) can earn that word, because only that path
+has something to run the patched program against. A standard repository's
+patch that passes its language's check is `IMPLEMENTED_VERIFICATION_
+INCOMPLETE`; one that fails it is `FAILED`; nothing here upgrades the first
+to the second on Gemini's own say-so.
+
+### Language adapters (`causeway/languages/`)
+
+One small adapter per language, added without touching the walking, scoring,
+bounding or patch-application logic anywhere else:
+
+| Language | Detected by | Safe verification |
+|---|---|---|
+| Python | `.py`, `requirements.txt`, `pyproject.toml`, `setup.py` | `py_compile` (parses and compiles to bytecode; never runs the module) |
+| JavaScript | `.js`/`.jsx`/`.mjs`/`.cjs`, `package.json` | `node --check` (parses only) |
+| TypeScript | `.ts`/`.tsx`, `tsconfig.json` | `tsc --noEmit`, only if a compiler is already present in the repository's own `node_modules` or on the machine's `PATH` — Causeway never installs one |
+| Java | `.java`, `pom.xml`/`build.gradle`(`.kts`) | `javac` against changed files whose imports are standard-library only; a file that imports anything else is reported unavailable, never guessed at |
+| Go | `.go`, `go.mod` | `go vet -mod=vendor`, only when the repository already vendors its dependencies — `go build`/`vet` otherwise resolves a module graph over the network, which this path does not do |
+| C | `.c`/`.h`, `Makefile`/`CMakeLists.txt` | `gcc -fsyntax-only` (no codegen, nothing linked or run) |
+| C++ | `.cpp`/`.cc`/`.cxx`/`.hpp`/`.hh`/`.hxx`, `Makefile`/`CMakeLists.txt` | `g++ -fsyntax-only` |
+| C# *(detection only)* | `.cs`, `*.csproj`/`*.sln` | unavailable — `dotnet build` needs `dotnet restore` first, which fetches NuGet packages over the network |
+| Rust *(detection only)* | `.rs`, `Cargo.toml` | `cargo check --offline`, only when the repository already vendors its crates |
+
+Detection uses multiple signals, never only an extension, and a repository
+may be — and often is — more than one language at once: `language_detected`
+reports a `primary` and every other language actually found, weighted by a
+project marker at the repository root (a strong signal) plus how many
+matching source files exist (a weaker one). A repository is rejected only
+when **no** adapter's signal is present at all, and the rejection names what
+Causeway does recognise rather than mentioning `causeway.json`.
+
+Every adapter's `verify` follows one rule without exception: it may run a
+compiler or interpreter's own syntax/type-check flag — never install a
+dependency, download a package, run a repository-provided script, or execute
+the program the repository defines. The moment that is not possible, it
+reports `available: False` and says why, rather than reaching for something
+riskier to produce an answer. `tests/test_languages.py` includes a static
+audit of every argv array an adapter can build, proving none of them is an
+install or fetch subcommand, plus a full run against a real, deliberately
+broken JavaScript repository through the actual orchestrator (mocked Gemini,
+real `node --check`) end to end.
+
+### What is shared with the causeway.json path, unchanged
+
+`causeway/patch/` — the `CodePatch` model, the Gemini planner, and the
+deterministic validator — is the same code both `causeway/requested_change.py`
+(a manifest repository's requested change) and `causeway/standard_investigation.py`
+(a repository with none) call. Widening language support never touched path
+safety, the denylist, or constraint enforcement; `causeway.languages.registry.
+is_denied_path` is the one function both source selection (a `.env` file is
+never even read into a prompt) and the patch validator (a patch may never
+touch one, regardless of what a planner was offered) call, so the two can
+never quietly disagree about what "denied" means.
+
+### Current limitations, stated plainly
+
+- **Compiling is not running.** Every standard-path check is a syntax or
+  type check. None of them proves the patched program behaves correctly at
+  runtime — that is what `IMPLEMENTED_VERIFICATION_INCOMPLETE` means, and
+  why this path never reports `VERIFIED`.
+- **A missing toolchain is not a failure.** Go, Rust, C#, and TypeScript
+  without a locally-available compiler all report `available: False` rather
+  than attempting to install one — the same honesty `py_compile`'s absence
+  would get if Python itself were somehow missing.
+- **Bounded context.** At most 12 files and 40,000 characters are shown to a
+  planner, scored by your instruction and by how central a file looks
+  (entrypoint names, root-level location) — a very large or deeply nested
+  repository may not surface the single most relevant file first.
+- **No arbitrary-language support.** A repository in a language with no
+  adapter here is rejected, honestly, for that — never silently treated as
+  one of the ones above.
+
 ## The bundled demonstration
 
 Running with no repository URL runs the bundled A/B demonstration: two
@@ -650,6 +765,24 @@ What differs is what a variable *is*.
           manifest.py       causeway.json v2 - capabilities only, never answers
           database.py       the repository's OWN database, from a declarative
                             contract; no command strings anywhere in it
+          standard.py       the manifest-less path: language detection dispatch,
+                            bounded scored source selection - no manifest required
+        languages/          one adapter per supported language - detection
+                            signals and one safe, non-executing verification path
+          base.py           the LanguageAdapter contract
+          registry.py       every adapter, the one detection pass, shared
+                            SKIP_DIRS and the credential/secret path denylist
+          adapters.py       Python, JavaScript, TypeScript, Java, Go, C, C++,
+                            C#, Rust
+        patch/              the CodePatch model + deterministic validator shared
+                            by causeway.requested_change AND
+                            causeway.standard_investigation
+        standard_investigation.py  a repository with no causeway.json: propose,
+                            validate, apply to a disposable copy, verify with
+                            whatever that file's language can safely check
+        requested_change.py  a causeway.json repository's requested change:
+                            the same patch machinery, verified against the
+                            manifest's own declared HTTP probes instead
         sandbox/
           seed.py           deterministic database builder + calibration
           service.py        the bundled demo order-service (its own process)

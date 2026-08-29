@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Mapping, Tuple
 
+from causeway.languages.registry import is_denied_path
 from causeway.patch.schema import (MAX_FILES, MAX_HUNK_CHARS, MAX_TOTAL_HUNKS,
                                    Check, CodePatch, PatchFile, PatchHunk,
                                    PatchRequest)
@@ -39,12 +40,11 @@ CHECK_NAMES = (
     "no_schema_change_respected",
 )
 
-# Substrings, checked case-insensitively against a repository-relative path.
-# Defense in depth on top of "must be in sources and patchable": those two
-# lists are the repository's own declaration, and this is Causeway's own
-# floor under it regardless of what a manifest says.
-_DENY_PATH_SUBSTRINGS = (".env", ".git/", ".git\\", "secret", "credential",
-                         "token", ".pem", ".key", "id_rsa")
+# is_denied_path (causeway.languages.registry) is the same check source
+# selection applies before a file is ever read into a prompt - shared so the
+# two can never disagree about what "denied" means. This is Causeway's own
+# floor under "must be in sources and patchable" regardless of what a
+# manifest says, and regardless of what a planner was actually offered.
 
 # Constructs an `after` text may not introduce. Not exhaustive - a
 # defense-in-depth net, not a sandbox - but it rules out the obvious ways a
@@ -174,8 +174,7 @@ def validate(raw: Mapping, request: PatchRequest, workspace: str, intent=None
         "repository's own manifest (sources=%s, patchable=%s)"
         % (", ".join(request.sources), ", ".join(request.patchable))))
 
-    denied = [f.path for f in patch.files
-             if any(bad in f.path.lower().replace("\\", "/") for bad in _DENY_PATH_SUBSTRINGS)]
+    denied = [f.path for f in patch.files if is_denied_path(f.path)]
     checks.append(Check(
         "paths_avoid_denied_files", not denied,
         "no denied file touched" if not denied

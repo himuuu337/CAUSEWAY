@@ -26,3 +26,15 @@ export function share(value: number | undefined, max: number): number {
 export function seconds(value?: number): string {
   return value === undefined ? '—' : `${value.toFixed(1)}s`
 }
+
+/** How each language id causeway.languages ships is shown on screen. Falls
+ * back to the id itself, so a language this file has not caught up with
+ * still renders as something rather than nothing. */
+const LANGUAGE_LABEL: Record<string, string> = {
+  python: 'Python', javascript: 'JavaScript', typescript: 'TypeScript',
+  java: 'Java', go: 'Go', c: 'C', cpp: 'C++', csharp: 'C#', rust: 'Rust',
+}
+
+export function languageLabel(id: string): string {
+  return LANGUAGE_LABEL[id] ?? id
+}

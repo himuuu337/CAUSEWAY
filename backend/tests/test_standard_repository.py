@@ -17,12 +17,12 @@ import unittest
 from unittest import mock
 
 from causeway import orchestrator
+from causeway.languages import detect_languages
 from causeway.patch.gemini import GeminiPatchPlanner
 from causeway.repository import git as repogit
 from causeway.repository import has_manifest
-from causeway.repository.standard import (detect_python, detect_tests,
-                                          discover_sources, guess_entrypoint,
-                                          load_standard)
+from causeway.repository.standard import (detect_tests, discover_sources,
+                                          guess_entrypoint, load_standard)
 from tests.repo_fixtures import local_repo
 
 REPO_URL = "https://github.com/bhoomikmoharana/test"
@@ -46,48 +46,52 @@ def _envelope(patch: dict) -> dict:
 
 
 class DetectionTests(unittest.TestCase):
-    """No network, no git - just the filesystem heuristics."""
+    """No network, no git - just the filesystem heuristics. Broader,
+    multi-language detection coverage lives in tests/test_languages.py; this
+    class keeps the original Python-specific regression coverage for the
+    exact reported repository shape."""
 
     def test_a_single_py_file_with_no_project_markers_is_still_detected(self):
         with local_repo({"test.py": BROKEN_SOURCE}) as root:
-            self.assertTrue(detect_python(root))
+            self.assertEqual(detect_languages(root).primary, "python")
             self.assertFalse(has_manifest(root))
 
     def test_a_repository_with_only_a_requirements_file_is_detected(self):
         with local_repo({"requirements.txt": "flask==3.0\n"}) as root:
-            self.assertTrue(detect_python(root))
+            self.assertEqual(detect_languages(root).primary, "python")
 
-    def test_a_repository_with_no_python_signal_at_all_is_not_detected(self):
+    def test_a_repository_with_no_recognised_signal_at_all_is_not_detected(self):
         with local_repo({"README.md": "just words"}) as root:
-            self.assertFalse(detect_python(root))
+            self.assertEqual(detect_languages(root).primary, "")
 
     def test_discover_sources_finds_and_reads_the_one_file(self):
         with local_repo({"test.py": BROKEN_SOURCE}) as root:
-            chosen, contents, all_files = discover_sources(root, "fix the bug")
+            chosen, contents, all_files, detection = discover_sources(root, "fix the bug")
             self.assertEqual(chosen, ["test.py"])
             self.assertEqual(contents["test.py"], BROKEN_SOURCE)
             self.assertEqual(all_files, ["test.py"])
+            self.assertEqual(detection.primary, "python")
 
     def test_an_entrypoint_name_is_preferred_when_present(self):
         with local_repo({"app.py": "print(1)\n", "helpers.py": "print(2)\n"}) as root:
-            chosen, _contents, _all = discover_sources(root)
-            self.assertEqual(guess_entrypoint(chosen), "app.py")
+            chosen, _contents, _all, detection = discover_sources(root)
+            self.assertEqual(guess_entrypoint(chosen, detection), "app.py")
 
     def test_no_recognisable_entrypoint_is_reported_as_empty_not_guessed(self):
-        self.assertEqual(guess_entrypoint(["test.py"]), "")
+        with local_repo({"test.py": "x = 1\n"}) as root:
+            _chosen, _contents, _all, detection = discover_sources(root)
+            self.assertEqual(guess_entrypoint(["test.py"], detection), "")
 
     def test_tests_are_detected_by_filename(self):
-        with local_repo({"test.py": "x = 1\n"}) as root:
-            found, _note = detect_tests(root, ["test.py"])
-            self.assertFalse(found)   # "test.py" is not "test_*.py"
-        with local_repo({"tests/test_thing.py": "x = 1\n"}) as root:
-            found, note = detect_tests(root, ["tests/test_thing.py"])
-            self.assertTrue(found)
-            self.assertIn("does not install", note)
+        found, _note = detect_tests(["test.py"])
+        self.assertFalse(found)   # "test.py" is not "test_*.py"
+        found, note = detect_tests(["tests/test_thing.py"])
+        self.assertTrue(found)
+        self.assertIn("does not install", note)
 
 
 class LoadStandardRejectionTests(unittest.TestCase):
-    def test_a_non_python_repository_is_rejected_by_analysis_not_by_manifest(self):
+    def test_a_repository_with_no_recognised_language_is_rejected_by_analysis(self):
         from causeway.repository.errors import RepositoryRejected
         from causeway.repository.urlcheck import RepoRef
 
@@ -201,11 +205,25 @@ class EndToEndAgainstTheReportedRepositoryTests(unittest.TestCase):
         self.assertEqual(verdicts[0]["verdict"], "IMPLEMENTED_VERIFICATION_INCOMPLETE")
         self.assertNotEqual(verdicts[0]["verdict"], "VERIFIED")
 
-    def test_a_syntax_check_actually_ran_against_the_patched_copy(self):
-        checks = self._of("syntax_check")
+    def test_a_verification_check_actually_ran_against_the_patched_copy(self):
+        checks = self._of("verification_check")
         self.assertEqual(len(checks), 1)
         self.assertEqual(checks[0]["file"], "test.py")
+        self.assertEqual(checks[0]["language"], "python")
+        self.assertEqual(checks[0]["tool"], "py_compile")
         self.assertTrue(checks[0]["passed"])
+
+    def test_the_repository_loaded_event_names_the_language(self):
+        loaded = self._of("repository_loaded")[0]
+        self.assertEqual(loaded["primary_language"], "python")
+        self.assertEqual(loaded["detected_languages"], ["python"])
+
+    def test_a_language_detected_event_is_emitted(self):
+        events = self._of("language_detected")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["primary"], "python")
+        self.assertEqual(events[0]["detected"], ["python"])
+        self.assertIn("python", events[0]["counts"])
 
     def test_the_run_ends_cleanly(self):
         self.assertEqual(self.events[-1]["type"], "done")

@@ -323,21 +323,29 @@ export type CausewayEvent =
       /** Which of the two repository paths this run is on. Absent on older
        * buffered events read as `undefined`, treated the same as 'causeway'. */
       contract?: 'causeway' | 'standard'
+      primary_language?: string
+      detected_languages?: string[]
+      language_counts?: Record<string, number>
       tests_detected?: boolean
       tests_note?: string
-      all_python_files?: number
+      all_source_files?: number
     }
   | { type: 'repository_rejected'; stage: string; reason: string }
   | {
-      type: 'standard_repository'
-      language: string
+      type: 'language_detected'
+      primary: string
+      detected: string[]
+      counts: Record<string, number>
+    }
+  | {
+      type: 'source_selection'
+      files: string[]
+      all_source_files: number
       entrypoint: string | null
-      all_python_files: number
-      files_selected: string[]
       tests_detected: boolean
       tests_note: string
     }
-  | { type: 'syntax_check'; file: string; passed: boolean; detail: string }
+  | { type: 'verification_check'; language: string; tool: string; file: string; passed: boolean; detail: string }
   | { type: 'requested_change_start'; instruction: string; goal: string; files_considered: string[] }
   | ({ type: 'patch_plan'; patch: CodePatch; provenance: Provenance })
   | ({ type: 'patch_validation' } & Validation)

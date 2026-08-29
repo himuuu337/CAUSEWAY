@@ -105,14 +105,16 @@ export interface RequestedChangeView {
   reason?: string
   /** Present only on the standard (manifest-less) path. */
   standard?: {
-    language: string
+    primaryLanguage: string
+    detectedLanguages: string[]
+    languageCounts: Record<string, number>
     entrypoint: string | null
-    allPythonFiles: number
+    allSourceFiles: number
     filesSelected: string[]
     testsDetected: boolean
     testsNote: string
   }
-  syntaxChecks?: { file: string; passed: boolean; detail: string }[]
+  verificationChecks?: { language: string; tool: string; file: string; passed: boolean; detail: string }[]
 }
 
 /** The repository lifecycle, folded from repository_* events only. `status`
@@ -136,9 +138,12 @@ export interface RepositoryView {
   /** 'standard' when this repository has no causeway.json - read and
    * proposed against directly, with no controlled causal experiment. */
   contract?: 'causeway' | 'standard'
+  primaryLanguage?: string
+  detectedLanguages?: string[]
+  languageCounts?: Record<string, number>
   testsDetected?: boolean
   testsNote?: string
-  allPythonFiles?: number
+  allSourceFiles?: number
 }
 
 export interface PipelineStage {
@@ -494,30 +499,51 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
         sources: event.sources, patchable: event.patchable,
         database: event.database ?? undefined, workload: event.workload ?? undefined,
         contract: event.contract ?? 'causeway',
+        primaryLanguage: event.primary_language, detectedLanguages: event.detected_languages,
+        languageCounts: event.language_counts,
         testsDetected: event.tests_detected, testsNote: event.tests_note,
-        allPythonFiles: event.all_python_files,
+        allSourceFiles: event.all_source_files,
         status: 'loaded',
       }
       return next
 
-    case 'standard_repository':
-      next.requestedChange = {
-        ...(state.requestedChange
-          ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
-        standard: {
-          language: event.language, entrypoint: event.entrypoint,
-          allPythonFiles: event.all_python_files, filesSelected: event.files_selected,
-          testsDetected: event.tests_detected, testsNote: event.tests_note,
-        },
-      }
-      return next
-
-    case 'syntax_check': {
+    case 'language_detected': {
       const base = state.requestedChange
         ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
       next.requestedChange = {
         ...base,
-        syntaxChecks: [...(base.syntaxChecks ?? []), event],
+        standard: {
+          ...(base.standard ?? { entrypoint: null, allSourceFiles: 0, filesSelected: [],
+                                testsDetected: false, testsNote: '' }),
+          primaryLanguage: event.primary, detectedLanguages: event.detected,
+          languageCounts: event.counts,
+        },
+      }
+      return next
+    }
+
+    case 'source_selection': {
+      const base = state.requestedChange
+        ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
+      next.requestedChange = {
+        ...base,
+        standard: {
+          ...(base.standard
+            ?? { primaryLanguage: '', detectedLanguages: [], languageCounts: {} }),
+          entrypoint: event.entrypoint, allSourceFiles: event.all_source_files,
+          filesSelected: event.files, testsDetected: event.tests_detected,
+          testsNote: event.tests_note,
+        },
+      }
+      return next
+    }
+
+    case 'verification_check': {
+      const base = state.requestedChange
+        ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
+      next.requestedChange = {
+        ...base,
+        verificationChecks: [...(base.verificationChecks ?? []), event],
       }
       return next
     }

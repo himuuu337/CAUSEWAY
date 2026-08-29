@@ -1,4 +1,5 @@
 import type { RepositoryView } from '../useInvestigation'
+import { languageLabel } from '../format'
 
 interface Props { view: RepositoryView }
 
@@ -38,7 +39,10 @@ export default function RepositoryPanel({ view }: Props) {
       {view.status === 'rejected' ? (
         <div className="notice repo-rejected">
           <div className="repo-rejected-title">UNSUPPORTED REPOSITORY</div>
-          <div>This repository does not contain a supported Causeway demo configuration.</div>
+          <div>
+            This repository is neither a supported causeway.json contract nor a
+            language Causeway&apos;s standard analysis currently recognises.
+          </div>
           {view.rejection && (
             <div className="small faint" style={{ marginTop: 6 }}>
               {view.rejection.stage}: {view.rejection.reason}
@@ -59,7 +63,20 @@ export default function RepositoryPanel({ view }: Props) {
               <span className="v">
                 standard repository (no causeway.json) — read and analysed directly,
                 no controlled causal experiment
-                {view.allPythonFiles !== undefined ? ` · ${view.allPythonFiles} .py file(s) found` : ''}
+                {view.allSourceFiles !== undefined ? ` · ${view.allSourceFiles} source file(s) found` : ''}
+              </span>
+            </div>
+          )}
+          {view.contract === 'standard' && view.primaryLanguage && (
+            <div className="repo-meta-row">
+              <span className="k">LANGUAGE</span>
+              <span className="v">
+                {languageLabel(view.primaryLanguage)}
+                {view.detectedLanguages && view.detectedLanguages.length > 1
+                  ? ` (also: ${view.detectedLanguages
+                      .filter((id) => id !== view.primaryLanguage)
+                      .map(languageLabel).join(', ')})`
+                  : ''}
               </span>
             </div>
           )}

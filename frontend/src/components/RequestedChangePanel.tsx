@@ -1,6 +1,7 @@
 import { modelOf } from '../useInvestigation'
 import type { RequestedChangeView } from '../useInvestigation'
 import type { VerificationCase } from '../types'
+import { languageLabel } from '../format'
 
 interface Props {
   view: RequestedChangeView
@@ -85,21 +86,46 @@ export default function RequestedChangePanel({ view }: Props) {
               standard repository — no causeway.json, no controlled experiment
             </span>
           </div>
-          <div className="repo-meta-row">
-            <span className="k">DETECTED</span>
-            <span className="v">
-              {view.standard.language} · {view.standard.allPythonFiles} .py file(s) found
-              {view.standard.entrypoint ? ` · likely entrypoint ${view.standard.entrypoint}` : ''}
-            </span>
-          </div>
-          <div className="repo-meta-row">
-            <span className="k">READ</span>
-            <span className="v mono">{view.standard.filesSelected.join(', ')}</span>
-          </div>
-          <div className="repo-meta-row">
-            <span className="k">TESTS</span>
-            <span className="v">{view.standard.testsNote}</span>
-          </div>
+          {view.standard.primaryLanguage && (
+            <div className="repo-meta-row">
+              <span className="k">LANGUAGE</span>
+              <span className="v">
+                {languageLabel(view.standard.primaryLanguage)}
+                {view.standard.languageCounts[view.standard.primaryLanguage] !== undefined
+                  ? ` · ${view.standard.languageCounts[view.standard.primaryLanguage]} file(s)`
+                  : ''}
+              </span>
+            </div>
+          )}
+          {view.standard.detectedLanguages.length > 1 && (
+            <div className="repo-meta-row">
+              <span className="k">ALSO DETECTED</span>
+              <span className="v">
+                {view.standard.detectedLanguages
+                  .filter((id) => id !== view.standard!.primaryLanguage)
+                  .map((id) => `${languageLabel(id)} (${view.standard!.languageCounts[id] ?? 0})`)
+                  .join(', ')}
+              </span>
+            </div>
+          )}
+          {view.standard.entrypoint && (
+            <div className="repo-meta-row">
+              <span className="k">ENTRYPOINT</span>
+              <span className="v mono">{view.standard.entrypoint}</span>
+            </div>
+          )}
+          {view.standard.filesSelected.length > 0 && (
+            <div className="repo-meta-row">
+              <span className="k">FILES READ</span>
+              <span className="v mono">{view.standard.filesSelected.join(', ')}</span>
+            </div>
+          )}
+          {view.standard.testsNote && (
+            <div className="repo-meta-row">
+              <span className="k">TESTS</span>
+              <span className="v">{view.standard.testsNote}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -174,13 +200,13 @@ export default function RequestedChangePanel({ view }: Props) {
         </div>
       )}
 
-      {view.syntaxChecks && view.syntaxChecks.length > 0 && (
+      {view.verificationChecks && view.verificationChecks.length > 0 && (
         <div className="probe-group" style={{ marginTop: 14 }}>
-          <div className="constraint-title">SYNTAX CHECK — disposable, patched copy</div>
-          {view.syntaxChecks.map((item, index) => (
+          <div className="constraint-title">VERIFICATION — disposable, patched copy</div>
+          {view.verificationChecks.map((item, index) => (
             <div key={index} className={`probe-case ${item.passed ? 'pass' : 'fail'}`}>
               <span className={`probe-dot ${item.passed ? 'pass' : 'fail'}`} aria-hidden="true" />
-              <span className="mono probe-request">{item.file}</span>
+              <span className="mono probe-request">{languageLabel(item.language)} · {item.tool} · {item.file}</span>
               <span className="spacer" />
               <span className="mono probe-status">{item.detail}</span>
             </div>

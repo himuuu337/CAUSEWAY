@@ -3,41 +3,32 @@ not ship causeway.json.
 
 causeway.json is required for exactly one thing: the controlled causal
 experiment (a repeatable workload replayed against a database built from the
-repository's own schema, so a hypothesis can be measured rather than asserted).
-Nothing else in Causeway needs it. A repository that does not opt into that
-contract can still be read, and a change can still be proposed and validated
-against it - there is simply no controlled experiment and no guaranteed way
-to run it, so verification is whatever is actually available: a syntax check
-always, real tests only if Causeway can tell they do not need dependencies it
-has not installed.
+repository's own schema, so a hypothesis can be measured rather than
+asserted). Nothing else in Causeway needs it. A repository that does not opt
+into that contract can still be read, and a change can still be proposed and
+validated against it - there is simply no controlled experiment and no
+guaranteed way to run it, so verification is whatever is actually available
+for whatever language the repository turns out to be written in.
 
-This module never launches anything. It reads files and decides whether the
-repository is a kind Causeway's prototype can read at all (Python, for the
-hackathon) - both file operations, neither one execution.
+Language detection and adapter selection live in causeway.languages; this
+module is what applies that to one repository: which languages are here,
+which of the repository's own files are worth showing a planner (bounded,
+scored, never the whole tree), and what the best guess at an entrypoint is.
+It never launches anything, and never runs a line of the repository's own
+code - both file operations, neither one execution.
 """
 from __future__ import annotations
 
 import io
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Dict, List, Mapping, Sequence, Tuple
 
+from causeway.languages import LanguageDetection, detect_languages
+from causeway.languages.registry import walk_files
 from causeway.repository.errors import RepositoryRejected
 from causeway.repository.git import ClonedRepo
 from causeway.repository.urlcheck import RepoRef
-
-# Directories never walked: version control metadata, virtualenvs, caches,
-# and anything else that is not the repository's own source.
-_SKIP_DIRS = frozenset((
-    ".git", "venv", ".venv", "env", ".env", "node_modules", "__pycache__",
-    ".pytest_cache", ".mypy_cache", ".tox", ".idea", ".vscode", "dist",
-    "build", "site-packages", ".eggs",
-))
-
-_PY_PROJECT_MARKERS = ("requirements.txt", "pyproject.toml", "setup.py",
-                       "Pipfile", "poetry.lock", "setup.cfg")
-_ENTRYPOINT_NAMES = ("app.py", "main.py", "manage.py", "wsgi.py", "asgi.py",
-                     "run.py", "server.py")
 
 # Bounded context: a standard-path planner is shown a small, chosen subset of
 # the repository's own files, never the whole repository blindly.
@@ -51,10 +42,12 @@ _STOPWORDS = frozenset((
     "only", "into", "your", "will", "should", "make", "sure", "fixed", "which",
 ))
 
+_TEST_MARKERS = ("test_", "_test.", ".test.", ".spec.", "test.go", "_spec.rb")
+
 
 @dataclass(frozen=True)
 class StandardRepositoryContext:
-    """A repository read without a manifest: detected language, a bounded,
+    """A repository read without a manifest: languages detected, a bounded,
     scored selection of its own source, and nothing manufactured - no
     database, no workload, no hypothesis. Whatever verification is possible
     is decided at investigation time from what is actually here."""
@@ -64,13 +57,15 @@ class StandardRepositoryContext:
     url: str
     commit_sha: str
     workspace: str
-    language: str                        # "python" - the only one detected today
+    primary_language: str                # "" only if nothing was detected (never loaded)
+    detected_languages: Tuple[str, ...]   # every language found, primary first
+    language_counts: Mapping[str, int]    # language id -> matched source file count
     entrypoint: str                      # best-guess; "" if none was recognisable
     sources: Tuple[str, ...]             # bounded, scored selection - analysable
     patchable: Tuple[str, ...]           # the same files - this path has no other list
     tests_detected: bool
     tests_note: str
-    all_python_files: Tuple[str, ...]    # every .py file found, for display only
+    all_source_files: Tuple[str, ...]    # every recognised source file, for display only
     cloned: ClonedRepo = field(repr=False, compare=False)
 
     def cleanup(self) -> None:
@@ -80,36 +75,16 @@ class StandardRepositoryContext:
         return {
             "owner": self.owner, "name": self.name, "url": self.url,
             "commit_sha": self.commit_sha, "service": self.name,
-            "runtime": self.language, "verification": "none",
+            "runtime": self.primary_language, "verification": "none",
             "entrypoint": self.entrypoint, "sources": list(self.sources),
             "patchable": list(self.patchable),
             "database": None, "workload": None, "contract": "standard",
+            "primary_language": self.primary_language,
+            "detected_languages": list(self.detected_languages),
+            "language_counts": dict(self.language_counts),
             "tests_detected": self.tests_detected, "tests_note": self.tests_note,
-            "all_python_files": len(self.all_python_files),
+            "all_source_files": len(self.all_source_files),
         }
-
-
-def _walk_python_files(workspace: str) -> List[str]:
-    found = []
-    for root, dirs, files in os.walk(workspace):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.endswith(".egg-info")]
-        for name in files:
-            if name.endswith(".py"):
-                relative = os.path.relpath(os.path.join(root, name), workspace)
-                found.append(relative.replace(os.sep, "/"))
-    return sorted(found)
-
-
-def detect_python(workspace: str) -> bool:
-    """Is this a repository Causeway's prototype can read at all?
-
-    File presence only - never an import, never a subprocess. A hackathon
-    scope: Python, recognised the way a person skimming the repo tree would.
-    """
-    for marker in _PY_PROJECT_MARKERS:
-        if os.path.isfile(os.path.join(workspace, marker)):
-            return True
-    return bool(_walk_python_files(workspace))
 
 
 def _instruction_words(instruction: str) -> Sequence[str]:
@@ -121,19 +96,21 @@ def _instruction_words(instruction: str) -> Sequence[str]:
     return words
 
 
-def _score(relative: str, content: str, words: Sequence[str]) -> float:
+def _score(relative: str, content: str, words: Sequence[str],
+          entrypoint_names: Sequence[str]) -> float:
     name = os.path.basename(relative).lower()
     score = 0.0
-    if name in _ENTRYPOINT_NAMES:
+    if name in entrypoint_names:
         score += 100.0
-    if name == "__init__.py":
+    if name in ("__init__.py", "index.js", "index.ts"):
         score -= 10.0
     if "/" not in relative:
         score += 20.0                          # root-level files first
     lowered_path = relative.lower()
-    if "test" in lowered_path:
+    if any(marker in lowered_path for marker in ("test", "spec", "__tests__")):
         score -= 25.0                          # readable, but rarely the edit target
-    if "migrations" in lowered_path or "vendor" in lowered_path:
+    if any(marker in lowered_path for marker in
+          ("migrations", "vendor", "generated", ".min.")):
         score -= 40.0
     lowered_content = content.lower()
     for word in words:
@@ -143,22 +120,39 @@ def _score(relative: str, content: str, words: Sequence[str]) -> float:
     return score
 
 
-def discover_sources(workspace: str, instruction: str = ""
-                     ) -> Tuple[List[str], Dict[str, str], List[str]]:
-    """A bounded, scored selection of the repository's own Python source.
+def discover_sources(workspace: str, instruction: str = "",
+                     detection: LanguageDetection = None
+                     ) -> Tuple[List[str], Dict[str, str], List[str], LanguageDetection]:
+    """A bounded, scored selection of the repository's own recognised
+    source, across every language detected - not only the primary one, so a
+    mixed repository still shows a planner the file it actually needs.
 
-    Returns (chosen, contents, all_files): `chosen` is the ordered list of
-    relative paths a planner will actually be shown (and the only ones it may
-    propose an edit to); `contents` maps every readable candidate to its text,
-    for scoring and for later re-reading; `all_files` is every .py file found,
-    for display only - Causeway is not silently ignoring the rest, it is
-    bounding what one prompt carries.
+    Returns (chosen, contents, all_source_files, detection). `chosen` is the
+    ordered list of relative paths a planner will actually be shown (and the
+    only ones it may propose an edit to); `contents` maps every readable
+    candidate to its text; `all_source_files` is every recognised source
+    file found, for display only - Causeway is not silently ignoring the
+    rest, it is bounding what one prompt carries.
     """
-    all_files = _walk_python_files(workspace)
+    all_files = walk_files(workspace)
+    if detection is None:
+        detection = detect_languages(workspace, all_files)
+
+    from causeway.languages.registry import ADAPTERS, is_denied_path
+    # is_denied_path is the same floor causeway.patch.validator applies to a
+    # proposed edit - applied here too, so a credential-shaped file is never
+    # even read into a prompt in the first place.
+    recognised = [f for f in all_files
+                 if any(a.matches_file(f) for a in ADAPTERS) and not is_denied_path(f)]
+    entrypoint_names = {
+        name for language in detection.detected
+        for name in (_adapter_entrypoints(language))
+    }
+
     words = _instruction_words(instruction)
     contents: Dict[str, str] = {}
     scored: List[Tuple[float, str]] = []
-    for relative in all_files:
+    for relative in recognised:
         path = os.path.join(workspace, relative)
         try:
             if os.path.getsize(path) > MAX_FILE_BYTES_TO_READ:
@@ -168,12 +162,12 @@ def discover_sources(workspace: str, instruction: str = ""
         except OSError:
             continue
         contents[relative] = text
-        scored.append((_score(relative, text, words), relative))
+        scored.append((_score(relative, text, words, entrypoint_names), relative))
 
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
     chosen: List[str] = []
     total = 0
-    for _, relative in scored:
+    for _score_value, relative in scored:
         if len(chosen) >= MAX_FILES:
             break
         text = contents[relative]
@@ -182,21 +176,35 @@ def discover_sources(workspace: str, instruction: str = ""
             continue
         chosen.append(relative)
         total += cost
-    return sorted(chosen), contents, all_files
+    return sorted(chosen), contents, recognised, detection
 
 
-def guess_entrypoint(sources: Sequence[str]) -> str:
-    for name in _ENTRYPOINT_NAMES:
-        for relative in sources:
-            if relative == name or relative.endswith("/" + name):
-                return relative
+def _adapter_entrypoints(language_id: str) -> Sequence[str]:
+    from causeway.languages.registry import adapter_for
+    adapter = adapter_for(language_id)
+    return adapter.entrypoint_names if adapter else ()
+
+
+def guess_entrypoint(sources: Sequence[str], detection: LanguageDetection) -> str:
+    """Case-insensitive on purpose: a conventional entrypoint name like
+    Java's Main.java is capitalised by convention, and entrypoint_names is
+    written lowercase - the file itself is still the one being matched."""
+    for language in detection.detected:
+        for name in _adapter_entrypoints(language):
+            for relative in sources:
+                lowered = relative.lower()
+                if lowered == name or lowered.endswith("/" + name):
+                    return relative
     return ""
 
 
-def detect_tests(workspace: str, all_python_files: Sequence[str]) -> Tuple[bool, str]:
-    for relative in all_python_files:
-        base = os.path.basename(relative)
-        if base.startswith("test_") or base.endswith("_test.py") or "/tests/" in relative:
+def detect_tests(all_source_files: Sequence[str]) -> Tuple[bool, str]:
+    for relative in all_source_files:
+        base = os.path.basename(relative).lower()
+        lowered = relative.lower()
+        if (any(marker in base for marker in _TEST_MARKERS)
+                or "/tests/" in lowered or "/test/" in lowered
+                or "/__tests__/" in lowered):
             return True, (
                 "test files were found, but Causeway does not install this "
                 "repository's dependencies or execute its tests automatically - "
@@ -207,31 +215,36 @@ def detect_tests(workspace: str, all_python_files: Sequence[str]) -> Tuple[bool,
 
 def load_standard(cloned: ClonedRepo, ref: RepoRef, instruction: str = ""
                   ) -> StandardRepositoryContext:
-    """Read a cloned workspace without a manifest. Rejects only when the
-    repository is not a kind Causeway's prototype can read at all - never
-    because it lacks causeway.json."""
-    if not detect_python(cloned.path):
+    """Read a cloned workspace without a manifest. Rejects only when no
+    supported language was detected at all - never because it lacks
+    causeway.json."""
+    chosen, _contents, all_source_files, detection = discover_sources(
+        cloned.path, instruction)
+
+    if not detection.primary:
+        from causeway.languages.registry import ADAPTERS
+        supported = ", ".join(sorted(a.display_name for a in ADAPTERS))
         raise RepositoryRejected(
             "analysis",
             "no supported language was detected in this repository. Causeway's "
-            "prototype reads Python repositories (requirements.txt, "
-            "pyproject.toml, setup.py, or .py files) - none of those were "
-            "found at %s" % ref.url)
+            "prototype currently recognises %s - none of their signal files or "
+            "source extensions were found at %s" % (supported, ref.url))
 
-    chosen, _contents, all_files = discover_sources(cloned.path, instruction)
     if not chosen:
         raise RepositoryRejected(
             "analysis",
-            "Python was detected but no readable .py source file was found to "
-            "analyse (every candidate was empty, unreadable, or too large)")
+            "%s was detected but no readable source file was found to analyse "
+            "(every candidate was empty, unreadable, or too large)"
+            % detection.primary)
 
-    entrypoint = guess_entrypoint(chosen)
-    tests_detected, tests_note = detect_tests(cloned.path, all_files)
+    entrypoint = guess_entrypoint(chosen, detection)
+    tests_detected, tests_note = detect_tests(all_source_files)
 
     return StandardRepositoryContext(
         owner=ref.owner, name=ref.name, url=ref.url, commit_sha=cloned.commit_sha,
-        workspace=cloned.path, language="python", entrypoint=entrypoint,
-        sources=tuple(chosen), patchable=tuple(chosen),
+        workspace=cloned.path, primary_language=detection.primary,
+        detected_languages=detection.detected, language_counts=detection.counts,
+        entrypoint=entrypoint, sources=tuple(chosen), patchable=tuple(chosen),
         tests_detected=tests_detected, tests_note=tests_note,
-        all_python_files=tuple(all_files), cloned=cloned,
+        all_source_files=tuple(all_source_files), cloned=cloned,
     )
