@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Assessment, Candidate, Exclusion } from '../types'
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
  * the state of belief BEFORE any intervention, and letting a result leak back
  * into it would flatten the whole point of the demo.
  */
-export default function Candidates({
+function Candidates({
   candidates, excluded, assessments, topSuspect, deploysConsidered,
 }: Props) {
   if (candidates.length === 0) return null
@@ -87,3 +88,5 @@ export default function Candidates({
     </section>
   )
 }
+
+export default memo(Candidates)
