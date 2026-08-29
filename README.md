@@ -15,28 +15,77 @@ comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
 the module that produces the verdict and fails the build if anything
 model-shaped, networked or planner-shaped becomes reachable from it.
 
-## Status: Milestone 1
+## Status: Milestone 2
 
-The deterministic causal core, verified from the command line. No UI yet, no
-Gemini yet, both on purpose.
+The causal core, and a live investigation streamed to a browser. The interface
+is deliberately unstyled - Milestone 2 is about proving the wire carries real
+measurements, not about how they look.
 
 | | |
 |---|---|
 | Milestone 1 | causal core, CLI-verified · **done** |
-| Milestone 2 | API + SSE + frontend shell |
+| Milestone 2 | API + SSE + frontend shell · **done** |
 | Milestone 3 | the investigation dashboard |
 | Milestone 4 | Gemini planner behind the existing validator |
 | Milestone 5 | fix generation and fix verification (stretch) |
 
-## Quick start
+## Running it
 
-Python 3.10+. No third-party dependencies at this milestone.
+Python 3.10+ and Node 18+.
 
     cd backend
+    pip install -r requirements.txt
     python -m causeway.cli seed          # size the sandbox to this machine
-    python -m causeway.cli investigate   # run the full investigation
-    python -m causeway.cli events        # the same run as raw NDJSON
     python -m unittest discover -s tests -t . -v
+
+    cd ..\frontend
+    npm install
+    npm run build                        # tsc --noEmit && vite build
+
+Then one process, one URL - this is the demo-day path:
+
+    cd ..\backend
+    python -m causeway.api               # http://127.0.0.1:8000
+
+While iterating, two processes instead (`run-dev.ps1` starts both):
+
+    cd backend  && python -m causeway.api
+    cd frontend && npm run dev           # http://127.0.0.1:5173, proxies /api
+
+The command line still works and needs no dependencies at all:
+
+    python -m causeway.cli investigate   # the full investigation, in the terminal
+    python -m causeway.cli events        # the same run as raw NDJSON
+
+## The API
+
+| | |
+|---|---|
+| `GET /api/health` | is the backend up, is this machine seeded, what thresholds is the engine using |
+| `GET /api/status` | what the current investigation is doing |
+| `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
+| `GET /api/investigation/stream` | Server-Sent Events, resumable |
+| `GET /api/investigation/{id}/events` | the whole buffer as JSON |
+
+One investigation runs at a time, on purpose: the sandbox is a real process
+measuring real latency, and two investigations sharing a machine would measure
+each other.
+
+Every SSE frame carries its buffer index as `id:`, so a browser that
+reconnects with `Last-Event-ID` gets exactly the events it missed. An
+investigation is tens of seconds of real measurement - a dropped connection
+must never mean running the sandbox again. Frames are unnamed `message`
+events, so a client cannot silently drop an event type nobody registered a
+listener for.
+
+    id: 34
+    data: {"type": "phase_judged", "hypothesis": "B", "phase": "ablate",
+           "state": "healthy", "p95_ms": 10.84, "local_control_ms": 8.82,
+           "ratio": 1.23, "controls_agree": true, "drift": 1.0}
+
+The frontend renders what arrives and computes nothing. `PROVEN` appears on
+screen because the backend emitted `{"type": "verdict", "verdict": "PROVEN"}`,
+and for no other reason.
 
 ## The demo incident
 

@@ -1,0 +1,172 @@
+"""The HTTP surface.
+
+One investigation runs at a time and its events are streamed to the browser
+over Server-Sent Events, in the order the engine emitted them and with their
+content unchanged. The interface renders what it is sent; it does not compute
+verdicts, and it is not given the means to.
+
+    GET  /api/health                     is the backend up, and is it seeded
+    GET  /api/status                     what the current investigation is doing
+    POST /api/investigation              start one (409 if one is running)
+    GET  /api/investigation/stream       SSE, resumable
+    GET  /api/investigation/{id}/events  the whole buffer as JSON
+
+This module is deliberately thin. The awkward behaviour - resuming, closing,
+not hanging on a finished run - lives in causeway/stream.py, where it can be
+executed on its own; everything here is wiring.
+"""
+from __future__ import annotations
+
+import os
+from typing import Optional
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+
+from causeway import config, stream, verdict
+from causeway.incident import INCIDENT
+from causeway.runs import AlreadyRunning, manager
+
+FRONTEND_DIST = os.path.join(os.path.dirname(config.BACKEND_ROOT),
+                             "frontend", "dist")
+
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    # nginx and friends buffer text/event-stream by default, which turns a
+    # live investigation into one lump at the end
+    "X-Accel-Buffering": "no",
+}
+
+app = FastAPI(title="Causeway", version="0.2.0",
+              description="Experimental root-cause verification")
+
+# The built frontend is served from this same process, so a demo is one URL.
+# These origins are for `npm run dev`, where Vite serves the page on 5173.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+# -------------------------------------------------------------------- health
+
+@app.get("/api/health")
+def health() -> dict:
+    seeded = config.is_ready()
+    return {
+        "status": "ok" if seeded else "not-seeded",
+        "seeded": seeded,
+        "hint": None if seeded else "run: python -m causeway.cli seed",
+        "incident": {"id": INCIDENT["id"], "service": INCIDENT["service"],
+                     "title": INCIDENT["title"]},
+        "engine": {
+            "phases": list(verdict.PHASES),
+            "verdicts": [verdict.PROVEN, verdict.REFUTED,
+                         verdict.SUPPORTED, verdict.UNRESOLVED],
+            "failure_factor": verdict.FAILURE_FACTOR,
+            "recovery_factor": verdict.RECOVERY_FACTOR,
+        },
+        "frontend_built": os.path.isdir(FRONTEND_DIST),
+    }
+
+
+@app.get("/api/status")
+def status() -> dict:
+    return manager.status()
+
+
+# ------------------------------------------------------------- investigation
+
+@app.post("/api/investigation")
+def start_investigation():
+    if not config.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail={"reason": "not-seeded",
+                    "message": "this machine is not seeded yet",
+                    "hint": "run: python -m causeway.cli seed"})
+    try:
+        run = manager.start()
+    except AlreadyRunning as exc:
+        # Not an error anyone needs to act on: the client attaches to the run
+        # that is already in progress rather than being told no.
+        #
+        # The run summary is spread FIRST and the explicit keys last. The other
+        # way round, status()'s own `error` field - empty while a run is
+        # healthy - silently overwrote the reason for the 409, and the client
+        # got a conflict with no explanation in it.
+        return JSONResponse(
+            status_code=409,
+            content={**manager.status(),
+                     "reason": "already-running",
+                     "run_id": exc.run_id,
+                     "message": str(exc)})
+    return JSONResponse(status_code=202, content=run.summary())
+
+
+@app.get("/api/investigation/{run_id}/events")
+def all_events(run_id: str) -> dict:
+    run = manager.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no such investigation")
+    return {**run.summary(), "events": manager.events_from(run_id, 0)}
+
+
+@app.get("/api/investigation/stream")
+async def investigation_stream(
+    request: Request,
+    run_id: Optional[str] = Query(None),
+    from_index: int = Query(0, alias="from"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+):
+    """Follow an investigation, resumably."""
+    run = manager.get(run_id) if run_id else manager.run
+    if run is None:
+        raise HTTPException(status_code=404,
+                            detail="no investigation to stream - start one first")
+
+    return StreamingResponse(
+        stream.event_stream(
+            manager, run.id,
+            start_index=stream.resume_index(from_index, last_event_id),
+            is_disconnected=request.is_disconnected,
+        ),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+# ------------------------------------------------------------------ frontend
+
+if os.path.isdir(FRONTEND_DIST):
+    assets = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.isdir(assets):
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @app.get("/")
+    def index():
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+
+
+def main():
+    import argparse
+
+    import uvicorn
+
+    parser = argparse.ArgumentParser(prog="causeway-api")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--reload", action="store_true")
+    args = parser.parse_args()
+    uvicorn.run("causeway.api:app" if args.reload else app,
+                host=args.host, port=args.port, reload=args.reload,
+                log_level="info")
+
+
+if __name__ == "__main__":
+    main()

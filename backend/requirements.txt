@@ -1,2 +1,2 @@
-# Milestone 1 needs nothing beyond the standard library.
-# FastAPI and uvicorn arrive with the API in Milestone 2.
+fastapi>=0.110
+uvicorn[standard]>=0.27

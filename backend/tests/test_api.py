@@ -1,0 +1,121 @@
+"""The HTTP layer's own behaviour.
+
+Skipped when FastAPI is not installed, so a checkout without dependencies can
+still run the engine's tests. The handlers are called directly rather than
+through a client: everything asserted here is a decision api.py makes about
+what to put in a response, and none of it needs a socket.
+"""
+from __future__ import annotations
+
+import json
+import unittest
+
+try:
+    from causeway import api
+except ImportError:                                   # pragma: no cover
+    api = None
+
+from causeway import verdict
+from causeway.runs import AlreadyRunning, RunManager
+
+SKIP = "fastapi is not installed - run: pip install -r requirements.txt"
+
+
+def body_of(response) -> dict:
+    return json.loads(response.body)
+
+
+def never_finishes():
+    yield {"type": "stage", "stage": "experiment", "status": "running"}
+
+
+@unittest.skipIf(api is None, SKIP)
+class RouteTests(unittest.TestCase):
+    def test_the_documented_endpoints_are_registered(self):
+        paths = {route.path for route in api.app.routes}
+        for path in ("/api/health", "/api/status", "/api/investigation",
+                     "/api/investigation/stream",
+                     "/api/investigation/{run_id}/events"):
+            self.assertIn(path, paths)
+
+    def test_starting_an_investigation_is_a_post(self):
+        route = next(r for r in api.app.routes if r.path == "/api/investigation")
+        self.assertEqual(set(route.methods) & {"GET", "POST"}, {"POST"})
+
+
+@unittest.skipIf(api is None, SKIP)
+class HealthTests(unittest.TestCase):
+    def test_health_reports_the_engine_the_interface_is_talking_to(self):
+        payload = api.health()
+        self.assertEqual(payload["engine"]["phases"], list(verdict.PHASES))
+        self.assertEqual(payload["engine"]["failure_factor"], verdict.FAILURE_FACTOR)
+        self.assertEqual(payload["engine"]["recovery_factor"], verdict.RECOVERY_FACTOR)
+        self.assertIn(verdict.PROVEN, payload["engine"]["verdicts"])
+
+    def test_an_unseeded_machine_says_so_and_says_what_to_do(self):
+        payload = api.health()
+        if payload["seeded"]:
+            self.assertIsNone(payload["hint"])
+        else:
+            self.assertEqual(payload["status"], "not-seeded")
+            self.assertIn("seed", payload["hint"])
+
+
+@unittest.skipIf(api is None, SKIP)
+class ConflictTests(unittest.TestCase):
+    """A second investigation while one is in flight. The client attaches to
+    the run in progress, so the 409 has to carry which run that is."""
+
+    def setUp(self):
+        self.original = api.manager
+        api.manager = RunManager(source=never_finishes)
+        self.run = api.manager.start()
+
+    def tearDown(self):
+        api.manager = self.original
+
+    def test_a_second_start_is_a_409(self):
+        response = api.start_investigation()
+        self.assertEqual(response.status_code, 409)
+
+    def test_the_conflict_names_the_run_already_in_progress(self):
+        self.assertEqual(body_of(api.start_investigation())["run_id"], self.run.id)
+
+    def test_the_conflict_explains_itself(self):
+        """Regression: the run summary used to be spread over these keys, and
+        status()'s empty `error` field overwrote the reason for the conflict."""
+        payload = body_of(api.start_investigation())
+        self.assertEqual(payload["reason"], "already-running")
+        self.assertIn("already running", payload["message"])
+
+    def test_the_conflict_still_carries_the_run_status(self):
+        payload = body_of(api.start_investigation())
+        self.assertEqual(payload["state"], "running")
+        self.assertIn("event_count", payload)
+
+
+@unittest.skipIf(api is None, SKIP)
+class StreamingHeaderTests(unittest.TestCase):
+    def test_buffering_is_disabled_on_the_stream(self):
+        """A proxy that buffers text/event-stream turns a live investigation
+        into one lump at the end."""
+        self.assertEqual(api.SSE_HEADERS["X-Accel-Buffering"], "no")
+        self.assertIn("no-transform", api.SSE_HEADERS["Cache-Control"])
+
+
+@unittest.skipIf(api is None, SKIP)
+class BoundaryTests(unittest.TestCase):
+    def test_the_http_layer_cannot_reach_a_verdict_of_its_own(self):
+        """api.py may read verdict constants for /api/health. It must not be
+        able to decide anything - the import graph test covers the other
+        direction, and this covers the intent."""
+        import inspect
+        source = inspect.getsource(api)
+        for forbidden in ("verdict.decide", "verdict.explain", "verdict.reason",
+                          "failure_present", "recovered("):
+            self.assertNotIn(forbidden, source,
+                             "the API must not compute results: %r" % forbidden)
+
+
+if __name__ == "__main__":
+    unittest.main()

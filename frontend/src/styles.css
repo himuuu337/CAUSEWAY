@@ -1,0 +1,37 @@
+/* Milestone 2 is about the wire, not the look. Enough styling to read the
+   output; the real interface is Milestone 3. */
+:root { color-scheme: dark; }
+body {
+  margin: 0;
+  background: #0b0d10;
+  color: #d7dde5;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+main { max-width: 62rem; margin: 0 auto; padding: 1.5rem; }
+h1 { font-size: 1.4rem; letter-spacing: 0.18em; margin: 0; }
+h2 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.1em;
+     color: #9fb0c3; margin: 0 0 0.5rem; }
+header { border-bottom: 1px solid #1e242c; padding-bottom: 1rem; margin-bottom: 1rem; }
+section { border-top: 1px solid #1e242c; padding: 1rem 0; }
+.sub { color: #6f7d8c; font-weight: normal; }
+.error { color: #ff6b6b; border: 1px solid #4a1f1f; padding: 0.5rem; }
+.warn { color: #e0b341; }
+button {
+  background: #1b6ef3; color: #fff; border: 0; padding: 0.7rem 1.2rem;
+  font: inherit; letter-spacing: 0.08em; cursor: pointer; margin: 1rem 0;
+}
+button:disabled { background: #263041; color: #6f7d8c; cursor: not-allowed; }
+table { border-collapse: collapse; width: 100%; }
+td { padding: 0.15rem 0.6rem 0.15rem 0; vertical-align: top; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.id { font-weight: bold; }
+blockquote { margin: 0.5rem 0; padding-left: 0.8rem; border-left: 2px solid #263041;
+             color: #9fb0c3; }
+pre { background: #05070a; padding: 0.6rem; overflow-x: auto; font-size: 11px;
+      color: #6f7d8c; max-height: 18rem; }
+.verdict { margin-left: 0.6rem; padding: 0.1rem 0.5rem; border: 1px solid currentColor; }
+.proven, .healthy { color: #35c46b; }
+.refuted, .broken { color: #ff6b6b; }
+.supported { color: #4aa8d8; }
+.unresolved, .unstable, .inconclusive { color: #e0b341; }
+.state { font-weight: bold; }
