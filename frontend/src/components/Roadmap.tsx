@@ -1,22 +1,28 @@
+interface Props { causeVerified: boolean }
+
 const STEPS = [
-  { label: 'GITHUB INGESTION', state: 'Coming next' },
-  { label: 'REAL REPOSITORY CANDIDATES', state: 'Coming next' },
-  { label: 'REAL PRODUCTION TELEMETRY', state: 'Coming next' },
+  { label: 'PROPOSE FIX', state: 'Coming next' },
+  { label: 'APPLY IN SANDBOX', state: 'Coming next' },
+  { label: 'REPLAY INCIDENT', state: 'Coming next' },
+  { label: 'VERIFY RECOVERY', state: 'Coming next' },
 ]
 
 /**
- * What Causeway closes next, shown as roadmap rather than pretended. Nothing
- * here is wired to a backend, and it says so. The causal experiment and the
- * fix loop above are both real; this is only what comes after them.
+ * The rest of the loop, shown as roadmap rather than pretended. Nothing here
+ * is wired to a backend, and it says so.
  */
-export default function Roadmap() {
+export default function Roadmap({ causeVerified }: Props) {
   return (
     <section className="card">
       <div className="card-head">
-        <h2 className="card-title">What's next</h2>
-        <span className="card-note">not implemented yet — Milestone 6</span>
+        <h2 className="card-title">Fix verification</h2>
+        <span className="card-note">not implemented yet — the loop Causeway closes next</span>
       </div>
       <div className="roadmap">
+        <div className={`road${causeVerified ? ' done' : ''}`}>
+          <div className="r-label">CAUSE VERIFIED</div>
+          <div className="r-state">{causeVerified ? '✓ this run' : 'Run the investigation'}</div>
+        </div>
         {STEPS.map((step) => (
           <div className="road" key={step.label}>
             <div className="r-label">{step.label}</div>
