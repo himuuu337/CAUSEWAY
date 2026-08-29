@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Health, RunState } from '../types'
 
 interface Props {
@@ -11,7 +12,7 @@ const LABEL: Record<string, string> = {
   idle: 'IDLE', running: 'RUNNING', completed: 'COMPLETED', failed: 'FAILED',
 }
 
-export default function Header({ health, runState, connection, runId }: Props) {
+function Header({ health, runState, connection, runId }: Props) {
   const state = LABEL[runState] ?? String(runState).toUpperCase()
   return (
     <header className="masthead">
@@ -25,8 +26,8 @@ export default function Header({ health, runState, connection, runId }: Props) {
       <div className="badge-row">
         <span className="badge solid">{health ? health.incident.id : 'INCIDENT-001'}</span>
         <span className="badge">{health ? health.incident.service : 'order-service'}</span>
-        <span className={`badge ${runState}`}>
-          {runState === 'running' && <span className="pulse" />}
+        <span className={`badge ${runState}`} aria-live="polite">
+          {runState === 'running' && <span className="pulse" aria-hidden="true" />}
           {state}
         </span>
         {runId && <span className="badge">run {runId.slice(0, 8)}</span>}
@@ -35,3 +36,5 @@ export default function Header({ health, runState, connection, runId }: Props) {
     </header>
   )
 }
+
+export default memo(Header)
