@@ -11,7 +11,18 @@ from causeway.planner.schema import Check, ProviderUnavailable  # re-exported
 
 __all__ = ["MAX_FILES", "MAX_HUNKS_PER_FILE", "MAX_TOTAL_HUNKS", "MAX_HUNK_CHARS",
           "PATCH_SCHEMA", "PatchHunk", "PatchFile", "CodePatch", "PatchRequest",
-          "Check", "ProviderUnavailable"]
+          "Check", "ProviderUnavailable", "ProviderTimeout"]
+
+class ProviderTimeout(ProviderUnavailable):
+    """The provider was reachable but did not answer within its deadline.
+
+    A distinct type, not just a string a caller has to pattern-match: a
+    timeout is the one failure a dashboard should explain plainly ("retry,
+    or be more specific") rather than with whatever internal detail a
+    fallback declined with - and code that wants to tell the two apart
+    needs something more reliable than parsing prose.
+    """
+
 
 # A small, bounded number of actual file edits - never a whole-repository
 # rewrite, and never something too large for a human to review on screen.

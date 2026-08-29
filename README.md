@@ -278,8 +278,22 @@ session:
 Optional:
 
     $env:CAUSEWAY_GEMINI_MODEL="gemini-3.6-flash"   # default
-    $env:CAUSEWAY_GEMINI_TIMEOUT="20"               # seconds
+    $env:CAUSEWAY_GEMINI_TIMEOUT="20"               # seconds - the experiment and fix planners
+    $env:CAUSEWAY_GEMINI_PATCH_TIMEOUT_SECONDS="90" # seconds - the patch planner, its own variable
     $env:CAUSEWAY_OFFLINE="1"                       # never call Gemini
+
+`CAUSEWAY_GEMINI_PATCH_TIMEOUT_SECONDS` is deliberately separate from
+`CAUSEWAY_GEMINI_TIMEOUT`. `causeway/patch/gemini.py` (the requested-change
+and standard-repository patch planner) can carry a real repository's bounded
+source context - tens of files, tens of thousands of characters - where the
+experiment and fix planners' requests are small and structured; 90s gives it
+real headroom without silently widening the other two. It is clamped to
+`[5, 300]` seconds regardless of what is set, so a mistyped or malicious
+value can neither starve a request nor let one hang indefinitely. A patch
+request that still times out is reported cleanly - "AI patch generation
+timed out before a safe patch could be produced. No repository files were
+changed." - never with the internal detail of why a narrow offline fallback
+also declined; nothing is retried and nothing is applied.
 
 Check the setup before demoing - this asks for one real plan and prints what
 came back, without ever printing the key:

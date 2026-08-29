@@ -23,11 +23,25 @@ import urllib.error
 import urllib.request
 
 from causeway.patch.schema import (MAX_FILES, MAX_HUNKS_PER_FILE, MAX_HUNK_CHARS,
-                                   PatchRequest, ProviderUnavailable)
+                                   PatchRequest, ProviderTimeout, ProviderUnavailable)
 
 API_HOST = "https://generativelanguage.googleapis.com"
 DEFAULT_MODEL = "gemini-3.6-flash"
-DEFAULT_TIMEOUT = 25.0
+
+# Patch requests carry a bounded but potentially large selection of a
+# repository's own source (up to MAX_TOTAL_CHARS in causeway.repository.
+# standard / causeway.requested_change) - a much bigger prompt than the
+# small, structured requests causeway.planner.gemini and causeway.fixer.
+# gemini send, which is why this timeout is both longer by default and
+# configured through its own environment variable rather than the
+# CAUSEWAY_GEMINI_TIMEOUT those two share: widening one must not silently
+# change the other.
+DEFAULT_TIMEOUT = 90.0
+TIMEOUT_ENV_VAR = "CAUSEWAY_GEMINI_PATCH_TIMEOUT_SECONDS"
+# However this is configured, a patch request may never hang indefinitely
+# and may never be squeezed to nothing by a typo'd environment variable.
+MIN_TIMEOUT = 5.0
+MAX_TIMEOUT = 300.0
 
 SYSTEM_INSTRUCTION = (
     "You are proposing a concrete, narrowly-scoped source code change to "
@@ -89,10 +103,20 @@ def model_from_env() -> str:
 
 
 def timeout_from_env() -> float:
+    """CAUSEWAY_GEMINI_PATCH_TIMEOUT_SECONDS, defaulting to 90s and clamped
+    to [MIN_TIMEOUT, MAX_TIMEOUT]. Missing, empty, non-numeric, or NaN all
+    fall back to the default rather than raising - a malformed environment
+    variable should never be the reason a patch request cannot start."""
+    raw = os.environ.get(TIMEOUT_ENV_VAR)
+    if raw is None or not raw.strip():
+        return DEFAULT_TIMEOUT
     try:
-        return float(os.environ.get("CAUSEWAY_GEMINI_TIMEOUT", DEFAULT_TIMEOUT))
+        value = float(raw)
     except (TypeError, ValueError):
         return DEFAULT_TIMEOUT
+    if value != value:                          # NaN
+        return DEFAULT_TIMEOUT
+    return max(MIN_TIMEOUT, min(MAX_TIMEOUT, value))
 
 
 def build_prompt(request: PatchRequest) -> str:
@@ -223,7 +247,7 @@ class GeminiPatchPlanner:
         except urllib.error.URLError as exc:
             raise ProviderUnavailable(self._redact("Gemini unreachable: %s" % exc.reason))
         except socket.timeout:
-            raise ProviderUnavailable("Gemini timed out after %.0fs" % self.timeout)
+            raise ProviderTimeout("Gemini timed out after %.0fs" % self.timeout)
         except Exception as exc:                       # noqa: BLE001
             raise ProviderUnavailable(self._redact("%s: %s" % (type(exc).__name__, exc)))
 

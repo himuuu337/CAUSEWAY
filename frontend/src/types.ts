@@ -349,7 +349,7 @@ export type CausewayEvent =
   | { type: 'requested_change_start'; instruction: string; goal: string; files_considered: string[] }
   | ({ type: 'patch_plan'; patch: CodePatch; provenance: Provenance })
   | ({ type: 'patch_validation' } & Validation)
-  | { type: 'patch_rejected'; reason: string }
+  | { type: 'patch_rejected'; reason: string; detail?: string }
   | { type: 'patch_apply'; summary: string; files: string[]; diff: string; reasoning_summary: string; applied_to: string }
   | { type: 'verification_start'; cases: { probe: string; method: string; path: string; cases: string[] }[] }
   | ({ type: 'verification_case' } & VerificationCase)

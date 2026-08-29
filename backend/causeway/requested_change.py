@@ -110,7 +110,8 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
 
     if not outcome.report.accepted:
         yield {"type": "patch_rejected",
-               "reason": (outcome.fallback_reason or "no safe patch could be validated")}
+               "reason": patcher.display_rejection_reason(outcome),
+               "detail": outcome.fallback_reason}
         yield {"type": "done", "elapsed_s": round(time.time() - started, 1)}
         return
 
