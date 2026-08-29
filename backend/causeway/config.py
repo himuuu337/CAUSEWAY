@@ -28,6 +28,17 @@ def repetitions(default: int) -> int:
         return default
 
 
+def offline() -> bool:
+    """Force the deterministic planner regardless of what is configured.
+
+    A demo-day escape hatch: set CAUSEWAY_OFFLINE=1 and the investigation runs
+    without ever reaching for a network, whatever keys happen to be in the
+    environment.
+    """
+    return os.environ.get("CAUSEWAY_OFFLINE", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def is_ready() -> bool:
     return all(os.path.exists(p)
                for p in (TEMPLATE_DB, FIXTURE_PATH, CALIBRATION_PATH))

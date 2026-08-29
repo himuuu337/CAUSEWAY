@@ -128,10 +128,11 @@ _STATE_MARK = {"broken": "BROKEN", "healthy": "HEALTHY",
 
 def cmd_investigate(args) -> int:
     style = Style(enabled=not args.no_color)
+    offline = getattr(args, "offline", False) or None
     judged = {}
     status = 0
 
-    for event in investigate():
+    for event in investigate(offline=offline):
         kind = event["type"]
 
         if kind == "error":
@@ -192,8 +193,14 @@ def cmd_investigate(args) -> int:
             prov, plan = event["provenance"], event["plan"]
             _rule(style.bold(" [3] EXPERIMENT PLAN  %s" % event["hypothesis"])
                   + style.dim("   proposes only, never decides"))
-            label = ("AI PLANNER (%s)" % prov["source"] if prov["kind"] == "gemini"
-                     else "DETERMINISTIC PLANNER (%s)" % prov["source"])
+            # three states, three labels. A run that never had a key is a
+            # deterministic RUN, not a fallback, and must not be called one.
+            if prov["used_fallback"]:
+                label = "DETERMINISTIC FALLBACK"
+            elif prov["kind"] == "gemini":
+                label = "GEMINI (%s)" % prov["source"].replace("gemini:", "")
+            else:
+                label = "DETERMINISTIC PLANNER"
             print("   designed by     %s" % style.cyan(style.bold(label)))
             if prov["used_fallback"]:
                 print(style.dim("                   fell back from %s - %s"
@@ -280,23 +287,106 @@ def cmd_investigate(args) -> int:
 
 
 def cmd_events(args) -> int:
-    for event in investigate():
+    for event in investigate(offline=getattr(args, "offline", False) or None):
         print(json.dumps(event), flush=True)
         if event["type"] == "error":
             return 2
     return 0
 
 
+def cmd_gemini_check(args) -> int:
+    """Setup diagnostics for the planner. Never part of an investigation.
+
+    Prints whether a key is configured, which model is selected, which models
+    the key can actually reach, and whether one real round trip produces a plan
+    the validator accepts. It never prints the key.
+    """
+    from causeway import observational, planner
+    from causeway.incident import deploy_record
+    from causeway.localizer import localize
+    from causeway.planner.gemini import GeminiPlanner
+    from causeway.planner.schema import ProviderUnavailable
+
+    style = Style(enabled=not args.no_color)
+    provider = GeminiPlanner()
+    print("Causeway - Gemini planner check")
+    _rule()
+    print("  GEMINI_API_KEY   %s"
+          % (style.green("configured") if provider.available
+             else style.red("not set - the deterministic planner will be used")))
+    print("  model            %s" % provider.model)
+    print("  timeout          %.0fs" % provider.timeout)
+    if config.offline():
+        print("  " + style.yellow("CAUSEWAY_OFFLINE is set - investigations will "
+                                  "not call Gemini at all"))
+    if not provider.available:
+        print()
+        print("  Set a key for this PowerShell session with:")
+        print("    $env:GEMINI_API_KEY=\"<your key>\"")
+        return 1
+
+    print()
+    print("  models this key can use for generateContent:")
+    try:
+        names = provider.list_models()
+        for name in names[:14]:
+            marker = " <- selected" if name == provider.model else ""
+            print("    %s%s" % (name, style.green(marker)))
+        if provider.model not in names:
+            print("  " + style.yellow("  %s is not in that list - set "
+                                      "CAUSEWAY_GEMINI_MODEL to one that is"
+                                      % provider.model))
+    except ProviderUnavailable as exc:
+        print("    " + style.red("could not list models: %s" % exc))
+
+    print()
+    print("  asking Gemini for one experiment plan ...")
+    record = deploy_record()
+    candidates, _ = localize(record)
+    state = {candidate.change_id: True for candidate in candidates}
+    request = planner.build_request(
+        record["incident"], candidates, state, [config.FIXTURE_ID], "B",
+        observational=observational.rank(candidates, record["incident"]))
+    outcome = planner.plan_experiment(request, provider)
+    prov = outcome.as_dict()["provenance"]
+
+    if prov["kind"] == "gemini":
+        print("  " + style.green(style.bold("ACCEPTED")) + "  planned by %s"
+              % prov["source"])
+        print("    intervention   set %s = %s"
+              % (outcome.plan.intervention["flag"],
+                 "on" if outcome.plan.intervention["value"] else "off"))
+        _wrap('"%s"' % outcome.plan.reasoning_summary, "    ")
+        return 0
+
+    print("  " + style.yellow(style.bold("FELL BACK")) + " to the deterministic "
+          "planner")
+    _wrap(prov["fallback_reason"], "    ")
+    print(style.dim("    The demo still works - this is the path that keeps it "
+                    "working when Gemini is not."))
+    return 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="causeway")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("seed", help="size the sandbox database to this machine")
+
     run = sub.add_parser("investigate", help="run the full causal investigation")
     run.add_argument("--no-color", action="store_true")
-    sub.add_parser("events", help="the same run as raw NDJSON events")
+    run.add_argument("--offline", action="store_true",
+                     help="force the deterministic planner, never call Gemini")
+
+    events = sub.add_parser("events", help="the same run as raw NDJSON events")
+    events.add_argument("--offline", action="store_true")
+
+    check = sub.add_parser("gemini-check",
+                           help="is the Gemini planner configured and working")
+    check.add_argument("--no-color", action="store_true")
+
     args = parser.parse_args(argv)
     return {"seed": cmd_seed, "investigate": cmd_investigate,
-            "events": cmd_events}[args.command](args)
+            "events": cmd_events, "gemini-check": cmd_gemini_check}[args.command](args)
 
 
 if __name__ == "__main__":

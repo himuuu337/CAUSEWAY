@@ -15,7 +15,7 @@ comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
 the module that produces the verdict and fails the build if anything
 model-shaped, networked or planner-shaped becomes reachable from it.
 
-## Status: Milestone 3
+## Status: Milestone 4
 
 The causal core, a live investigation streamed to a browser, and the dashboard
 that explains it.
@@ -25,7 +25,7 @@ that explains it.
 | Milestone 1 | causal core, CLI-verified · **done** |
 | Milestone 2 | API + SSE + frontend shell · **done** |
 | Milestone 3 | the investigation dashboard · **done** |
-| Milestone 4 | Gemini planner behind the existing validator |
+| Milestone 4 | Gemini plans the experiments · **done** |
 | Milestone 5 | fix generation and fix verification (stretch) |
 
 ## What the dashboard shows, and what it is not allowed to do
@@ -184,6 +184,93 @@ through the same validator. Every plan carries its provenance, and the
 interface must show it. **Claiming AI designed an experiment the fallback
 designed would be the one dishonest thing Causeway could do.**
 
+## The Gemini planner
+
+Gemini designs the experiments. It decides nothing.
+
+Given the incident, the localised candidates, their correlation-only scores,
+the interventions the sandbox can make and the fixtures it can replay, it
+returns one `ExperimentSpec` - which change to remove, which traffic to replay,
+and what it would expect to see if that change were the cause. That output then
+passes the same eight deterministic checks the offline planner's output passes.
+It is never weakened for the model.
+
+    incident evidence -> Gemini -> ExperimentSpec -> validator -> sandbox
+                                                  -> measurements -> verdict
+
+**The information boundary.** `causeway/planner/gemini.py:build_prompt` is the
+boundary, and tests assert on the string it produces: no phase result, no
+ratio, no control, no verdict, no phase name, no millisecond figure of any
+kind, and nothing that says which candidate is the real cause. `PlanRequest`
+has no field that could carry one either - that is checked structurally, not
+just textually. The model is told the judging *rule* (the failure counts as
+present at 4x a local control and gone at 2.5x) because it needs that to
+express an expectation; it is never told a measurement.
+
+**What it cannot do.** It cannot declare a verdict: a plan carrying a `verdict`
+or `confidence` key is rejected outright, and verdict language in any field the
+engine reads is rejected too. `reasoning_summary` is the exception - it is
+prose for a human, quoted on screen and never read by the engine, so a plan
+claiming "B is PROVEN" is accepted and *flagged*, and a test proves the
+computed verdict is untouched. It cannot choose a threshold, name a metric of
+its own, invent an intervention, move more than one flag, or fabricate a
+fixture. And it is not reachable from `causeway/verdict.py` - the import-graph
+test now names `causeway.planner.gemini` explicitly.
+
+**Which candidate gets tested is not Gemini's call.** The orchestrator runs one
+experiment per localised candidate, in the localizer's deterministic order, and
+asks Gemini to design each one. That is an experimental policy rather than a
+narrative one: refuting A is a result in its own right, and stopping at the
+first hypothesis would mean never learning that the top-ranked suspect is
+innocent. Gemini designs the experiment; it does not choose the agenda.
+
+### Three planner states, three labels
+
+| What happened | `kind` | `used_fallback` | Shown as |
+|---|---|---|---|
+| Gemini proposed a plan and the validator accepted it | `gemini` | `false` | **Gemini** |
+| Gemini was asked and something went wrong | `deterministic` | `true` | **Deterministic Fallback** |
+| No key configured, or `--offline` | `deterministic` | `false` | **Deterministic Planner** |
+
+A run that never had a key is a deterministic *run*, not a fallback, and
+nothing in the terminal or the browser calls it one. Nothing is ever labelled
+Gemini unless a Gemini plan was the one that ran.
+
+"Something went wrong" is deliberately everything: no key, an unreachable API,
+an HTTP error, rate limiting, a timeout, malformed JSON, a response that is not
+a plan, a schema violation, or a plan the validator rejects. All of it lands in
+the same place, the investigation completes, and the verdict is unchanged.
+
+### Running with Gemini on Windows
+
+The key lives in the environment and nowhere else. For the current PowerShell
+session:
+
+    $env:GEMINI_API_KEY="<your key>"
+
+Optional:
+
+    $env:CAUSEWAY_GEMINI_MODEL="gemini-2.5-flash"   # default
+    $env:CAUSEWAY_GEMINI_TIMEOUT="20"               # seconds
+    $env:CAUSEWAY_OFFLINE="1"                       # never call Gemini
+
+Check the setup before demoing - this asks for one real plan and prints what
+came back, without ever printing the key:
+
+    cd backend
+    python -m causeway.cli gemini-check
+
+If the model name is wrong it lists the ones the key can actually use. Then run
+the investigation as usual; the planner is chosen automatically:
+
+    python -m causeway.api            # or: python -m causeway.cli investigate
+
+`python -m causeway.cli investigate --offline` forces the deterministic planner
+for a run where nothing may touch the network. The key is read only by
+`causeway/planner/gemini.py`, travels in a request header rather than a URL, is
+redacted from every error message, and never enters an event, the SSE stream or
+the browser. `.env` is gitignored.
+
 ## The controlled experiment
 
 Each hypothesis runs seven phases. Every phase that carries evidence has a
@@ -264,7 +351,9 @@ commit. Worth saying out loud rather than letting someone find it.
         planner/
           schema.py         ExperimentSpec and the JSON schema
           validator.py      the eight deterministic checks
-          deterministic.py  the fallback planner
+          deterministic.py  the offline planner, and the fallback for every
+                            possible Gemini failure
+          gemini.py         Gemini over REST - proposes, never decides
         sandbox/
           seed.py           deterministic database builder + calibration
           service.py        the demo order-service (its own process)

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from causeway import verdict
 from causeway.planner.deterministic import DeterministicPlanner
+from causeway.planner.gemini import GeminiPlanner
 from causeway.planner.schema import (ExperimentPlan, PlanRequest,
                                      PLAN_SCHEMA, ProviderUnavailable)
 from causeway.planner.validator import ValidationReport, validate
@@ -45,12 +46,26 @@ class PlanOutcome:
         }
 
 
-def build_request(incident, candidates, incident_state, fixtures, target):
+def build_request(incident, candidates, incident_state, fixtures, target,
+                  observational=None):
+    """Assemble everything a planner is allowed to see.
+
+    `observational` optionally supplies the correlation-only scores, which are
+    legitimate pre-experiment evidence: they say how suspicious a change looks,
+    not whether it is causal. Nothing measured during an experiment can enter
+    here - PlanRequest has no field that could carry one, and a test asserts
+    that the rendered prompt contains no result, ratio or verdict.
+    """
+    scores = {}
+    for assessment in observational or ():
+        scores[assessment.change_id] = assessment.score
+
     return PlanRequest(
         incident=dict(incident),
         candidates=tuple({
             "change_id": c.change_id, "branch": c.branch, "summary": c.summary,
             "lines_changed": c.lines_changed, "files_changed": c.files_changed,
+            "observational_score": scores.get(c.change_id),
         } for c in candidates),
         intervention_surfaces=tuple(sorted(incident_state)),
         incident_state=dict(incident_state),
@@ -95,9 +110,17 @@ def plan_experiment(request: PlanRequest, provider) -> PlanOutcome:
 
 
 def default_provider(offline: bool = False):
-    """Gemini arrives in Milestone 4. Until then there is one planner, and the
-    UI is told exactly which one it is."""
-    return DeterministicPlanner()
+    """Which planner to ask first.
+
+    Gemini when a key is configured and offline was not requested; the
+    deterministic planner otherwise. The distinction matters downstream: a run
+    that never had a key is a deterministic RUN, not a fallback, and the
+    interface must not call it one.
+    """
+    if offline:
+        return DeterministicPlanner()
+    gemini = GeminiPlanner()
+    return gemini if gemini.available else DeterministicPlanner()
 
 
 def phases_for(plan: ExperimentPlan, incident_state):

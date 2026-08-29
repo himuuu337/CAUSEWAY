@@ -231,6 +231,11 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
  * deterministic run is never called a fallback, and nothing is ever called
  * Gemini unless the backend reported `kind: "gemini"`.
  */
+/** `gemini:gemini-2.5-flash` reads better as just the model. */
+export function modelOf(source: string): string {
+  return source.startsWith('gemini:') ? source.slice('gemini:'.length) : source
+}
+
 function pipelineOf(state: InvestigationState): PipelineStage[] {
   const stage = (name: string): StageStatus =>
     state.stages[name] === 'done' ? 'done'
@@ -245,9 +250,16 @@ function pipelineOf(state: InvestigationState): PipelineStage[] {
   let plannerDetail = 'Awaiting plan'
   let plannerKind: 'code' | 'ai' = 'ai'
   if (provenance) {
-    if (provenance.used_fallback) plannerDetail = 'Deterministic Fallback'
-    else if (provenance.kind === 'gemini') plannerDetail = `Gemini · ${provenance.source}`
-    else plannerDetail = 'Deterministic Planner'
+    // Three states, three labels. A run that never had a key is a deterministic
+    // RUN, not a fallback; and nothing is called Gemini unless the backend
+    // reported that a Gemini plan was the one accepted.
+    if (provenance.used_fallback) {
+      plannerDetail = 'Deterministic Fallback'
+    } else if (provenance.kind === 'gemini') {
+      plannerDetail = `Gemini · ${modelOf(provenance.source)}`
+    } else {
+      plannerDetail = 'Deterministic Planner'
+    }
     plannerKind = provenance.kind === 'gemini' && !provenance.used_fallback ? 'ai' : 'code'
   }
 

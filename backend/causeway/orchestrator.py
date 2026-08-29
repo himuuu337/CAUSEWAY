@@ -41,9 +41,12 @@ def _stage(name: str, status: str, **extra) -> dict:
                  "t": round(time.time(), 3)}, **extra)
 
 
-def investigate(repetitions: int = None, offline: bool = True) -> Iterator[dict]:
+def investigate(repetitions: int = None, offline: bool = None) -> Iterator[dict]:
     """Run the whole investigation, yielding events as they happen."""
     reps = config.repetitions(REPETITIONS if repetitions is None else repetitions)
+    # Gemini when a key is configured, the deterministic planner otherwise.
+    # CAUSEWAY_OFFLINE=1 forces deterministic whatever is in the environment.
+    use_offline = config.offline() if offline is None else bool(offline)
     started = time.time()
 
     if not config.is_ready():
@@ -94,12 +97,15 @@ def investigate(repetitions: int = None, offline: bool = True) -> Iterator[dict]
     order = [c.change_id for c in candidates]
 
     # ---- 4. planning + validation (AI proposes, code validates) ---------
-    provider = planner.default_provider(offline=offline)
+    provider = planner.default_provider(offline=use_offline)
     outcomes = {}
     yield _stage("planning", "running", planner=provider.name)
     for change_id in order:
+        # the observational scores go in as pre-experiment evidence; nothing
+        # measured during an experiment can, and PlanRequest has no field for it
         request = planner.build_request(incident, candidates, incident_state,
-                                        [fixture["id"]], change_id)
+                                        [fixture["id"]], change_id,
+                                        observational=assessments)
         outcome = planner.plan_experiment(request, provider)
         outcomes[change_id] = outcome
         yield dict({"type": "plan", "hypothesis": change_id}, **outcome.as_dict())

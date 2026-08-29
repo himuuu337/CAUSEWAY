@@ -1,3 +1,4 @@
+import { modelOf } from '../useInvestigation'
 import type { HypothesisView } from '../useInvestigation'
 import type { Provenance } from '../types'
 
@@ -11,7 +12,7 @@ interface Props { views: HypothesisView[] }
  */
 function plannerLabel(provenance: Provenance): string {
   if (provenance.used_fallback) return 'DETERMINISTIC FALLBACK'
-  if (provenance.kind === 'gemini') return `GEMINI · ${provenance.source}`
+  if (provenance.kind === 'gemini') return `GEMINI · ${modelOf(provenance.source)}`
   return 'DETERMINISTIC PLANNER'
 }
 
@@ -77,8 +78,10 @@ export default function PlanPanel({ views }: Props) {
 
               <blockquote className="quote">{plan.reasoning_summary}</blockquote>
               <div className="notice">
-                Planner reasoning does not determine the verdict — it is quoted here and
-                never read by the engine.
+                {view.provenance && view.provenance.kind === 'gemini'
+                  && !view.provenance.used_fallback
+                  ? 'AI reasoning does not determine the verdict — it is quoted here and never read by the engine.'
+                  : 'Planner reasoning does not determine the verdict — it is quoted here and never read by the engine.'}
               </div>
 
               {validation && (
