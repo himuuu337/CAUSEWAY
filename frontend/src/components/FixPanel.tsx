@@ -1,11 +1,11 @@
 import { Fragment } from 'react'
 import { modelOf } from '../useInvestigation'
-import type { FixPhaseRow, FixView } from '../useInvestigation'
+import type { PhaseRow, HypothesisView } from '../useInvestigation'
 import type { Candidate } from '../types'
 import { ms, share, times } from '../format'
 
 interface Props {
-  view: FixView
+  view: HypothesisView
   candidate?: Candidate
 }
 
@@ -25,11 +25,11 @@ const FIX_VERDICT_WORD: Record<string, string> = {
   VERIFIED: 'FIX VERIFIED', FAILED: 'FIX FAILED', UNRESOLVED: 'UNRESOLVED',
 }
 
-function rowOf(view: FixView, phase: string): FixPhaseRow | undefined {
+function rowOf(view: HypothesisView, phase: string): PhaseRow | undefined {
   return view.phases.find((row) => row.phase === phase)
 }
 
-function plannerLabel(view: FixView): string {
+function plannerLabel(view: HypothesisView): string {
   const p = view.provenance
   if (!p) return 'AWAITING PLAN'
   if (p.used_fallback) return 'DETERMINISTIC FALLBACK'
@@ -37,7 +37,7 @@ function plannerLabel(view: FixView): string {
   return 'DETERMINISTIC PLANNER'
 }
 
-function plannerClass(view: FixView): string {
+function plannerClass(view: HypothesisView): string {
   const p = view.provenance
   if (!p) return 'planner-tag'
   if (p.used_fallback) return 'planner-tag fallback'
