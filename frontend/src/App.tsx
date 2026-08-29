@@ -6,7 +6,9 @@
  * on screen arrived from the backend; nothing here is computed, inferred or
  * revealed before the event that carries it.
  */
+import { useState } from 'react'
 import Header from './components/Header'
+import RepositoryPanel from './components/RepositoryPanel'
 import IncidentCard from './components/IncidentCard'
 import Pipeline from './components/Pipeline'
 import Candidates from './components/Candidates'
@@ -22,17 +24,31 @@ import './styles.css'
 
 export default function App() {
   const { state, health, busy, starting, start, pipeline } = useInvestigation()
+  const [repoUrl, setRepoUrl] = useState('')
 
   const notSeeded = health !== null && !health.seeded
   const views: HypothesisView[] = state.order
     .map((id) => state.hypotheses[id])
     .filter((view): view is HypothesisView => view !== undefined)
 
+  const hasRepoInput = repoUrl.trim().length > 0
   const buttonLabel = starting
     ? 'STARTING…'
     : state.runState === 'running'
       ? 'INVESTIGATION RUNNING…'
-      : 'RUN CAUSAL INVESTIGATION'
+      : hasRepoInput
+        ? 'ANALYZE & RUN CAUSAL INVESTIGATION'
+        : 'RUN CAUSAL INVESTIGATION'
+
+  // The live investigation's own incident (from the manifest, in repository
+  // mode) takes priority over the bundled demo's health-endpoint defaults,
+  // which are only ever a pre-run placeholder.
+  const incidentTitle = state.incident
+    ? state.incident.incident.title
+    : health ? health.incident.title : 'Order service latency incident'
+  const incidentService = state.incident
+    ? state.incident.incident.service
+    : health ? health.incident.service : 'order-service'
 
   return (
     <div className="wrap">
@@ -41,10 +57,27 @@ export default function App() {
         runState={state.runState}
         connection={state.connection}
         runId={state.runId}
+        incidentId={state.incident?.incident.id}
+        incidentService={state.incident?.incident.service}
       />
 
+      <div className="repo-input-row">
+        <label className="repo-label" htmlFor="repo-url">GitHub repository</label>
+        <input
+          id="repo-url"
+          className="repo-input"
+          type="text"
+          inputMode="url"
+          placeholder="https://github.com/owner/repo  (leave blank for the bundled demo)"
+          value={repoUrl}
+          onChange={(event) => setRepoUrl(event.target.value)}
+          disabled={busy}
+        />
+      </div>
+
       <div className="action">
-        <button className="run-btn" onClick={start} disabled={busy || notSeeded}>
+        <button className="run-btn" onClick={() => start(repoUrl.trim() || undefined)}
+               disabled={busy || notSeeded}>
           {buttonLabel}
         </button>
         <span className="hint">
@@ -54,7 +87,9 @@ export default function App() {
               ? `streaming — ${state.events.length} events received`
               : state.runState === 'completed'
                 ? 'complete — run it again to measure this machine afresh'
-                : 'reproduces the incident in a sandbox, removes one change at a time, and measures'}
+                : hasRepoInput
+                  ? 'clones the repository, validates it against the Causeway demo contract, then runs the same investigation'
+                  : 'reproduces the incident in a sandbox, removes one change at a time, and measures'}
         </span>
       </div>
 
@@ -65,10 +100,12 @@ export default function App() {
       )}
       {state.error && <div className="banner">{state.error}</div>}
 
+      {state.repository && <RepositoryPanel view={state.repository} />}
+
       <IncidentCard
         incident={state.incident}
-        title={health ? health.incident.title : 'Order service latency incident'}
-        service={health ? health.incident.service : 'order-service'}
+        title={incidentTitle}
+        service={incidentService}
       />
 
       <Pipeline stages={pipeline} />

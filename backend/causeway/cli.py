@@ -132,17 +132,40 @@ _STATE_MARK = {"broken": "BROKEN", "healthy": "HEALTHY",
 def cmd_investigate(args) -> int:
     style = Style(enabled=not args.no_color)
     offline = getattr(args, "offline", False) or None
+    repository_url = getattr(args, "repository_url", None)
     judged = {}
     status = 0
 
-    for event in investigate(offline=offline):
+    for event in investigate(offline=offline, repository_url=repository_url):
         kind = event["type"]
 
         if kind == "error":
             print(style.red(event["message"]), file=sys.stderr)
             return 2
 
-        if kind == "incident":
+        if kind == "repository_validating":
+            print(style.dim(" validating repository URL: %s" % event["url"]))
+
+        elif kind == "repository_cloning":
+            print(style.dim(" cloning %s/%s ..." % (event["owner"], event["name"])))
+
+        elif kind == "repository_loaded":
+            print("=" * WIDTH)
+            print(style.bold(" REPOSITORY   %s/%s" % (event["owner"], event["name"])))
+            print(" commit %s   service %s   runtime %s"
+                 % (event["commit_sha"][:12], event["service"], event["runtime"]))
+            print(style.green("   supported Causeway project"))
+            for c in event["candidates"]:
+                print(style.dim("     %s  %s" % (c["change_id"], c["branch"])))
+
+        elif kind == "repository_rejected":
+            print(style.red(" UNSUPPORTED REPOSITORY (%s): %s"
+                            % (event["stage"], event["reason"])), file=sys.stderr)
+            print(style.dim(" this repository does not contain a supported Causeway "
+                            "demo configuration"), file=sys.stderr)
+            return 2
+
+        elif kind == "incident":
             incident, cal = event["incident"], event["calibration"]
             print("=" * WIDTH)
             print(style.bold(" CAUSEWAY   %s   %s"
@@ -337,9 +360,11 @@ def cmd_investigate(args) -> int:
 
 
 def cmd_events(args) -> int:
-    for event in investigate(offline=getattr(args, "offline", False) or None):
+    offline = getattr(args, "offline", False) or None
+    repository_url = getattr(args, "repository_url", None)
+    for event in investigate(offline=offline, repository_url=repository_url):
         print(json.dumps(event), flush=True)
-        if event["type"] == "error":
+        if event["type"] in ("error", "repository_rejected"):
             return 2
     return 0
 
@@ -426,9 +451,13 @@ def main(argv=None) -> int:
     run.add_argument("--no-color", action="store_true")
     run.add_argument("--offline", action="store_true",
                      help="force the deterministic planner, never call Gemini")
+    run.add_argument("--repository-url", default=None,
+                     help="investigate a GitHub repository (https://github.com/<owner>/<repo>) "
+                          "instead of the bundled demo")
 
     events = sub.add_parser("events", help="the same run as raw NDJSON events")
     events.add_argument("--offline", action="store_true")
+    events.add_argument("--repository-url", default=None)
 
     check = sub.add_parser("gemini-check",
                            help="is the Gemini planner configured and working")

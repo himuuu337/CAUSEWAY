@@ -5,14 +5,22 @@ interface Props {
   runState: RunState | 'idle'
   connection: string
   runId: string | null
+  /** The live investigation's own incident, once it has arrived - takes
+   * priority over `health`'s bundled-demo defaults, since a repository's
+   * manifest may declare a different incident entirely. */
+  incidentId?: string
+  incidentService?: string
 }
 
 const LABEL: Record<string, string> = {
   idle: 'IDLE', running: 'RUNNING', completed: 'COMPLETED', failed: 'FAILED',
 }
 
-export default function Header({ health, runState, connection, runId }: Props) {
+export default function Header({ health, runState, connection, runId,
+                                incidentId, incidentService }: Props) {
   const state = LABEL[runState] ?? String(runState).toUpperCase()
+  const id = incidentId ?? (health ? health.incident.id : 'INCIDENT-001')
+  const service = incidentService ?? (health ? health.incident.service : 'order-service')
   return (
     <header className="masthead">
       <div className="brand">
@@ -23,8 +31,8 @@ export default function Header({ health, runState, connection, runId }: Props) {
       <div className="spacer" />
 
       <div className="badge-row">
-        <span className="badge solid">{health ? health.incident.id : 'INCIDENT-001'}</span>
-        <span className="badge">{health ? health.incident.service : 'order-service'}</span>
+        <span className="badge solid">{id}</span>
+        <span className="badge">{service}</span>
         <span className={`badge ${runState}`}>
           {runState === 'running' && <span className="pulse" />}
           {state}

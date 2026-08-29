@@ -15,10 +15,11 @@ comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
 the module that produces the verdict and fails the build if anything
 model-shaped, networked or planner-shaped becomes reachable from it.
 
-## Status: Milestone 4
+## Status: Milestone 6
 
-The causal core, a live investigation streamed to a browser, and the dashboard
-that explains it.
+The causal core, a live investigation streamed to a browser, the dashboard
+that explains it, a verified fix loop, and GitHub repository ingestion for a
+narrowly scoped, contract-following repository.
 
 | | |
 |---|---|
@@ -26,7 +27,8 @@ that explains it.
 | Milestone 2 | API + SSE + frontend shell · **done** |
 | Milestone 3 | the investigation dashboard · **done** |
 | Milestone 4 | Gemini plans the experiments · **done** |
-| Milestone 5 | fix generation and fix verification (stretch) |
+| Milestone 5 | Gemini plans a fix, verified in a disposable sandbox copy · **done** |
+| Milestone 6 | GitHub repository ingestion, narrowly scoped · **done** |
 
 ## What the dashboard shows, and what it is not allowed to do
 
@@ -84,13 +86,16 @@ The command line still works and needs no dependencies at all:
     python -m causeway.cli investigate   # the full investigation, in the terminal
     python -m causeway.cli events        # the same run as raw NDJSON
 
+    python -m causeway.cli investigate --repository-url https://github.com/<owner>/<repo>
+                                          # investigate a repository instead of the bundled demo
+
 ## The API
 
 | | |
 |---|---|
 | `GET /api/health` | is the backend up, is this machine seeded, what thresholds is the engine using |
 | `GET /api/status` | what the current investigation is doing |
-| `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
+| `POST /api/investigation` | start one - optionally `{"repository_url": "https://github.com/..."}`. `202` with a run id, or `409` naming the run already in progress |
 | `GET /api/investigation/stream` | Server-Sent Events, resumable |
 | `GET /api/investigation/{id}/events` | the whole buffer as JSON |
 
@@ -320,6 +325,141 @@ tail. Every phase is therefore replayed three times and its number is the
 median of those repetitions. That makes the *estimator* robust; it does not
 change what a measurement has to clear, so it cannot influence a verdict.
 
+## The fix loop
+
+Once a hypothesis is deterministically `PROVEN` - never before, and never for
+one that is only `SUPPORTED` or `REFUTED` - Causeway asks a second, narrower
+question: what should the broken code become?
+
+    root_cause_proven -> Gemini FixSpec -> deterministic fix validator ->
+    sandbox fix application (disposable copy) -> identical workload replay ->
+    deterministic measurements -> deterministic fix verdict
+
+Gemini sees the proven hypothesis, the causal mechanism, and the current
+(broken) value at one named, whitelisted repair surface - never a
+fix-verification measurement, because none exists yet, and never the
+known-safe answer, which lives only in a module Gemini's code path cannot
+reach. It returns a `FixSpec`: which surface, and what it should become. The
+same nine-check deterministic validator every proposal goes through rejects
+anything that targets an unregistered surface, doesn't match the sandbox's
+real current value, isn't the one known-safe repair, or smuggles a verdict
+into a field the engine reads.
+
+A validated fix is applied only to a **disposable copy** of the service code
+- never the checked-in source - and that copy is launched as its own
+subprocess. The same incident workload is then replayed through a five-phase
+protocol (`fix-control-1, fix-before, fix-control-2, fix-after,
+fix-control-3`) that reproduces the failure on the unpatched service and
+retests it on the patched one, judged by the identical local-control
+arithmetic the causal verdict uses. `causeway/fix_verdict.py` is the only
+place `VERIFIED` / `FAILED` / `UNRESOLVED` is decided, and
+`test_no_model_in_fix_verdict.py` proves nothing model-shaped, networked, or
+subprocess-shaped is reachable from it - the same structural guarantee
+`causeway/verdict.py` has for the causal decision.
+
+**Nothing is ever deployed.** A verified fix is shown for human review; it is
+never pushed, committed, merged, or applied to any file Causeway did not
+create disposably for the run.
+
+## GitHub repository ingestion
+
+Causeway can investigate a GitHub repository instead of the bundled demo -
+but it does not attempt to support arbitrary repositories, and it says so
+plainly when a repository does not qualify.
+
+**Causeway's hackathon prototype supports repositories following the
+Causeway demo contract.** It does not autonomously debug any GitHub
+repository - only ones that declare, at their root, exactly what Causeway is
+allowed to run.
+
+    GitHub URL -> validate -> clone (disposable, isolated workspace) ->
+    causeway.json validated -> the same causal investigation and fix loop
+    described above, sourced from the cloned workspace
+
+### Supported URL format
+
+Exactly `https://github.com/<owner>/<repo>`, with an optional trailing
+`.git`. Rejected: any other scheme (`http://`, `file://`, `javascript:`),
+any host other than `github.com`, credentials embedded in the URL, a port, a
+path outside `<owner>/<repo>`, and path traversal in any form - the
+validator is an allow-list against GitHub's own owner/repo naming rules, not
+a denylist of things to reject.
+
+### The supported repository contract
+
+A repository qualifies only if it has a `causeway.json` manifest at its
+root:
+
+    {
+      "version": 1,
+      "service": "order-service",
+      "runtime": "python",
+      "entrypoint": "service.py",
+      "fixture": "fixtures/incident-001.json",
+      "incident": { "id": "...", "title": "...", "service": "...",
+                    "symptom": "...", "detected_at": "...",
+                    "window_seconds": 900, "hot_path_files": ["..."] },
+      "deploys": [ { "change_id": "A", "sha": "...", "branch": "...",
+                     "service": "...", "summary": "...", "deployed_at": "...",
+                     "files_changed": 9, "lines_changed": 412,
+                     "changed_files": ["..."] }, "..." ],
+      "repair_surface": { "hypothesis_id": "B", "target": "SCANNING_PREDICATE",
+                          "operation_type": "replace_predicate",
+                          "safe_after": "order_id = ?", "description": "..." }
+    }
+
+`entrypoint` and `fixture` are resolved and checked to stay inside the
+cloned workspace - a path that escapes it, by any spelling, is rejected, not
+sanitised. `runtime` is checked against a whitelist (`python` only, for now).
+A manifest that is missing, malformed, the wrong version, or missing any
+required field is rejected outright:
+
+    UNSUPPORTED REPOSITORY
+    "This repository does not contain a supported Causeway demo configuration."
+
+A rejected repository **never reaches a subprocess**. Causeway does not
+install a dependency on the repository's behalf, does not run a
+repository-provided setup script or hook, and does not guess how to execute
+an unsupported layout.
+
+### What actually runs
+
+The cloned entrypoint is launched as a subprocess - `python <entrypoint>` -
+exactly the way the bundled demo's own `causeway/sandbox/service.py` is
+launched. It is never `import`ed into the Causeway process. The clone itself
+uses `git clone --depth 1` with an argument-array subprocess call (never
+`shell=True`), repository-provided hooks disabled, credential prompts
+disabled outright, and a bounded timeout. The workspace is a fresh temporary
+directory, removed once the investigation ends - the developer's own
+Causeway checkout is never written to, and neither is the repository being
+investigated.
+
+**Causeway never silently substitutes the bundled demo.** A repository URL
+either produces a real investigation of that repository, sourced from its
+own fixture and its own entrypoint, or a visible rejection - never a quiet
+fallback to `fixtures/incident-001.json`.
+
+### Current limitations
+
+- **Public repositories only.** No OAuth, no personal access token, no
+  GitHub App - a private repository fails cleanly (no credential prompt,
+  just a clean rejection) rather than being supported.
+- **One supported runtime** (`python`, standard library only) and one
+  supported repair operation type (`replace_predicate`) for this milestone.
+- **Sandbox-only fix verification.** Exactly as the bundled demo's fix loop:
+  a verified fix is shown for human review. Nothing is pushed, committed,
+  merged, or deployed - to the repository investigated or anywhere else.
+- **One investigation at a time**, same as the bundled demo - the sandbox is
+  real process measuring real latency.
+
+### The demo repository
+
+`demo-repo/` in this checkout is a complete, working example of the
+contract - the same controlled order-service incident the bundled demo
+ships, with its own `causeway.json`, checked in as a real repository so it
+can be pushed to GitHub and pointed at directly. See `demo-repo/README.md`
+for how to publish it.
+
 ## Sizing, not hardcoding
 
 `python -m causeway.cli seed` measures this machine and sizes the audit table
@@ -343,9 +483,10 @@ commit. Worth saying out loud rather than letting someone find it.
 
     backend/
       causeway/
-        verdict.py          THE VERDICT - no model may be reachable from here
+        verdict.py          THE CAUSAL VERDICT - no model may be reachable from here
+        fix_verdict.py      THE FIX VERDICT - same structural guarantee, five phases
         measurement.py      p50/p95, and the median across repetitions
-        incident.py         the incident and the deploy record (data)
+        incident.py         the bundled demo's incident and deploy record (data)
         localizer.py        deterministic candidate filtering
         observational.py    the correlation-only baseline - structurally blind
         planner/
@@ -354,13 +495,26 @@ commit. Worth saying out loud rather than letting someone find it.
           deterministic.py  the offline planner, and the fallback for every
                             possible Gemini failure
           gemini.py         Gemini over REST - proposes, never decides
+        fixer/
+          schema.py         FixSpec and the JSON schema
+          validator.py      the nine deterministic fix checks
+          deterministic.py  the offline fix planner and fallback
+          gemini.py         Gemini proposes a fix - never verifies one
+        repository/
+          urlcheck.py       GitHub URL validation - an allow-list, not a denylist
+          git.py            safe, argument-array clone into a disposable workspace
+          manifest.py       causeway.json - the supported repository contract
         sandbox/
           seed.py           deterministic database builder + calibration
-          service.py        the demo order-service (its own process)
+          service.py        the bundled demo order-service (its own process)
           replay.py         deterministic fixture replay
           runner.py         lifecycle: restore, set flags, replay, repeat
+          repair.py         the bundled demo's whitelisted repair surface
+          fixapply.py       patches a disposable copy - never the checked-in source
         orchestrator.py     the investigation, as a stream of events
-        cli.py              milestone 1 entry point
+        api.py               the HTTP surface
+        cli.py               the command-line entry point
       tests/
-      fixtures/             recorded traffic (portable, in git)
+      fixtures/             the bundled demo's recorded traffic (portable, in git)
       .data/                this machine's database and calibration (not in git)
+    demo-repo/              a real, working example of the repository contract

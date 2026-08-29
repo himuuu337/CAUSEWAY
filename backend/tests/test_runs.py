@@ -38,6 +38,11 @@ def blocks(gate):
     return source
 
 
+def rejects_the_repository(repository_url):
+    yield {"type": "repository_validating", "url": repository_url}
+    yield {"type": "repository_rejected", "stage": "url", "reason": "not a github URL"}
+
+
 class LifecycleTests(unittest.TestCase):
     def test_a_completed_run_ends_with_a_terminal_event(self):
         manager = RunManager(source=finishes)
@@ -83,6 +88,56 @@ class LifecycleTests(unittest.TestCase):
         manager.join(5)
         self.assertTrue(manager.is_closed(run.id))
         self.assertFalse(manager.is_closed("some-other-run"))
+
+
+class RepositoryTests(unittest.TestCase):
+    """The manager's own part of Milestone 6: passing repository_url through
+    to the source callable, and noticing a rejection the same way it notices
+    an `error` event. Nothing here touches git or the network - `finishes`
+    and `rejects_the_repository` are plain stand-in generators, exactly like
+    the rest of this file uses for the bundled path."""
+
+    def test_a_run_started_without_a_repository_url_calls_the_source_with_no_arguments(self):
+        """Every stand-in generator in this file (and causeway.orchestrator's
+        own default parameters) takes zero arguments for the bundled demo -
+        that contract must not change just because repository_url exists."""
+        calls = []
+
+        def source():
+            calls.append(())
+            yield {"type": "done", "elapsed_s": 0.0}
+
+        manager = RunManager(source=source)
+        manager.start()
+        manager.join(5)
+        self.assertEqual(calls, [()])
+
+    def test_a_run_started_with_a_repository_url_passes_it_to_the_source(self):
+        seen = []
+
+        def source(repository_url=None):
+            seen.append(repository_url)
+            yield {"type": "done", "elapsed_s": 0.0}
+
+        manager = RunManager(source=source)
+        manager.start(repository_url="https://github.com/foo/bar")
+        manager.join(5)
+        self.assertEqual(seen, ["https://github.com/foo/bar"])
+
+    def test_the_run_records_which_repository_it_was_started_against(self):
+        manager = RunManager(source=finishes)
+        run = manager.start(repository_url="https://github.com/foo/bar")
+        self.assertEqual(run.repository_url, "https://github.com/foo/bar")
+        manager.join(5)
+
+    def test_a_rejected_repository_marks_the_run_failed(self):
+        manager = RunManager(source=rejects_the_repository)
+        run = manager.start(repository_url="not-a-github-url")
+        manager.join(5)
+        self.assertEqual(manager.status()["state"], STATE_FAILED)
+        self.assertIn("not a github URL", manager.status()["error"])
+        types = [e["type"] for e in manager.events_from(run.id, 0)]
+        self.assertEqual(types, ["repository_validating", "repository_rejected", END])
 
 
 class ConcurrencyTests(unittest.TestCase):

@@ -75,6 +75,14 @@ export interface Validation {
   reasoning_flagged: boolean
 }
 
+/** One candidate as a repository's own causeway.json manifest declared it -
+ * never fabricated history, only what the repository itself said. */
+export interface RepositoryCandidateSummary {
+  change_id: string
+  branch: string
+  summary: string
+}
+
 /** A proposed fix, only ever requested for a hypothesis already PROVEN. */
 export interface FixOperation {
   type: string
@@ -146,6 +154,19 @@ export type CausewayEvent =
       drift: number
     }
   | { type: 'fix_verdict'; hypothesis: string; verdict: FixVerdict; reason: string; phases: unknown[] }
+  | { type: 'repository_validating'; url: string }
+  | { type: 'repository_cloning'; owner: string; name: string; url: string }
+  | {
+      type: 'repository_loaded'
+      owner: string
+      name: string
+      url: string
+      commit_sha: string
+      service: string
+      runtime: string
+      candidates: RepositoryCandidateSummary[]
+    }
+  | { type: 'repository_rejected'; stage: string; reason: string }
   | { type: 'done'; elapsed_s: number }
   | { type: 'error'; message: string }
   | { type: 'end'; run_id: string; state: RunState; error: string; event_count: number; elapsed_s: number }

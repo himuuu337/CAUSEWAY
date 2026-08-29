@@ -368,6 +368,51 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .chain-step .v { margin-top: 4px; }
 .chain-link { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1.9; }
 
+/* --------------------------------------------------------------- repository */
+
+.repo-input-row {
+  display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap;
+}
+.repo-label {
+  font: 11px/1 var(--sans); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-faint); white-space: nowrap;
+}
+.repo-input {
+  flex: 1 1 360px; min-width: 260px; font: 13px/1 var(--mono);
+  padding: 11px 13px; border-radius: var(--radius); border: 1px solid var(--line-strong);
+  background: var(--panel-2); color: var(--text);
+}
+.repo-input::placeholder { color: var(--text-faint); }
+.repo-input:focus { outline: none; border-color: var(--blue); }
+.repo-input:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+.repo-card { border-color: var(--line-strong); }
+.verdict-pill.repo-validating, .verdict-pill.repo-cloning {
+  color: var(--amber); border-color: var(--amber); background: var(--amber-bg);
+}
+.verdict-pill.repo-loaded { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.verdict-pill.repo-rejected { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+
+.repo-meta { display: grid; gap: 8px; }
+.repo-meta-row { display: flex; align-items: baseline; gap: 12px; font-size: 13px; }
+.repo-meta-row .k {
+  width: 80px; flex: 0 0 auto; font: 11px/1 var(--mono); letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.repo-meta-row .k.good { color: var(--green); width: auto; }
+.repo-meta-row .v.good { color: var(--green); }
+
+.repo-candidates { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.repo-candidate { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--text-dim); }
+.repo-candidate-branch { color: var(--text); min-width: 220px; }
+
+.notice.repo-rejected {
+  margin-top: 4px; padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--red); background: var(--red-bg); color: #ffb3ae;
+  font-family: var(--sans); font-size: 13px; letter-spacing: normal;
+}
+.repo-rejected-title { font: 700 12px/1 var(--mono); letter-spacing: 0.1em; margin-bottom: 6px; }
+
 /* -------------------------------------------------------------- fix loop */
 
 .fix-card { border-color: var(--violet); }

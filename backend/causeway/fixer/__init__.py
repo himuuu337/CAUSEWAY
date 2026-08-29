@@ -10,6 +10,7 @@ and causeway.sandbox.repair; neither of those imports back.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Mapping, Optional
 
 from causeway import verdict
 from causeway.fixer.deterministic import DeterministicFixPlanner
@@ -48,7 +49,9 @@ class FixOutcome:
 
 
 def build_fix_request(candidate: dict, hypothesis_id: str, causal_verdict: str,
-                      causal_reason: str) -> FixRequest:
+                      causal_reason: str,
+                      surfaces: Optional[Mapping[str, Mapping[str, dict]]] = None
+                      ) -> FixRequest:
     """Assemble everything a fix planner is allowed to see.
 
     Only ever called for a hypothesis the deterministic verdict has already
@@ -56,11 +59,15 @@ def build_fix_request(candidate: dict, hypothesis_id: str, causal_verdict: str,
     never something a planner supplies. `current_code` is read fresh from the
     real (unpatched) sandbox source, so a planner is always shown the value
     that is actually there right now.
+
+    `surfaces` is None for the bundled demo (causeway.sandbox.repair's own
+    REPAIR_SURFACES). A repository loaded through causeway.repository passes
+    its own manifest-declared surfaces mapping instead.
     """
-    targets = repair.targets_for(hypothesis_id)
-    current_code = {target: repair.current_value(hypothesis_id, target)
+    targets = repair.targets_for(hypothesis_id, surfaces=surfaces)
+    current_code = {target: repair.current_value(hypothesis_id, target, surfaces=surfaces)
                     for target in targets}
-    mechanisms = [repair.repair_surface(hypothesis_id, t)["description"]
+    mechanisms = [repair.repair_surface(hypothesis_id, t, surfaces=surfaces)["description"]
                  for t in targets]
     return FixRequest(
         hypothesis_id=hypothesis_id,
@@ -70,6 +77,7 @@ def build_fix_request(candidate: dict, hypothesis_id: str, causal_verdict: str,
         repair_targets=targets,
         current_code=current_code,
         mechanism="; ".join(mechanisms),
+        surfaces=surfaces,
     )
 
 
@@ -117,11 +125,12 @@ def default_fix_provider(offline: bool = False):
     return gemini if gemini.available else DeterministicFixPlanner()
 
 
-def fixable(causal_verdict: str, hypothesis_id: str) -> bool:
+def fixable(causal_verdict: str, hypothesis_id: str,
+           surfaces: Optional[Mapping[str, Mapping[str, dict]]] = None) -> bool:
     """Whether a fix should even be attempted: the verdict must be PROVEN, and
     at least one repair surface must be registered for this hypothesis. A is
     never PROVEN in the demo incident and has no repair surface either way -
     both are checked here so the orchestrator's policy and the validator's
     gate can never quietly drift apart."""
     return (causal_verdict == verdict.PROVEN
-            and bool(repair.targets_for(hypothesis_id)))
+            and bool(repair.targets_for(hypothesis_id, surfaces=surfaces)))

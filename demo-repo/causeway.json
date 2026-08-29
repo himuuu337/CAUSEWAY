@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "service": "order-service",
+  "runtime": "python",
+  "entrypoint": "service.py",
+  "fixture": "fixtures/incident-001.json",
+  "incident": {
+    "id": "INCIDENT-001",
+    "title": "Order Service Latency Incident",
+    "service": "order-service",
+    "symptom": "p95 latency on the order audit endpoint",
+    "detected_at": "2026-08-28T14:05:00Z",
+    "window_seconds": 900,
+    "hot_path_files": ["app/queries.py", "app/service.py"]
+  },
+  "deploys": [
+    {
+      "change_id": "A",
+      "sha": "4f1c9ab",
+      "branch": "refactor/order-query-batching",
+      "service": "order-service",
+      "summary": "Route audit lookups through a batching helper",
+      "deployed_at": "2026-08-28T14:02:54Z",
+      "files_changed": 9,
+      "lines_changed": 412,
+      "changed_files": [
+        "app/queries.py", "app/service.py", "app/batching/__init__.py",
+        "app/batching/collector.py", "app/batching/flatten.py",
+        "app/batching/dedupe.py", "app/models/summary.py",
+        "tests/test_batching.py", "docs/batching.md"
+      ]
+    },
+    {
+      "change_id": "B",
+      "sha": "9de20f4",
+      "branch": "perf/normalise-audit-predicate",
+      "service": "order-service",
+      "summary": "Normalise order_id inside the audit predicate",
+      "deployed_at": "2026-08-28T14:02:18Z",
+      "files_changed": 1,
+      "lines_changed": 3,
+      "changed_files": ["app/queries.py"]
+    },
+    {
+      "change_id": "C",
+      "sha": "77b1e05",
+      "branch": "chore/bump-billing-sdk",
+      "service": "billing-service",
+      "summary": "Bump the billing SDK to 4.2.1",
+      "deployed_at": "2026-08-28T14:01:10Z",
+      "files_changed": 2,
+      "lines_changed": 18,
+      "changed_files": ["billing/client.py", "requirements.txt"]
+    },
+    {
+      "change_id": "D",
+      "sha": "1a55cc8",
+      "branch": "feat/order-export-csv",
+      "service": "order-service",
+      "summary": "Add CSV export to the order report page",
+      "deployed_at": "2026-08-28T11:40:00Z",
+      "files_changed": 4,
+      "lines_changed": 96,
+      "changed_files": [
+        "app/export.py", "app/routes.py",
+        "templates/report.html", "tests/test_export.py"
+      ]
+    }
+  ],
+  "repair_surface": {
+    "hypothesis_id": "B",
+    "target": "SCANNING_PREDICATE",
+    "operation_type": "replace_predicate",
+    "safe_after": "order_id = ?",
+    "description": "the predicate order_id lookups use against order_audit; wrapping the column in an expression makes the index idx_audit_order(order_id) unusable"
+  }
+}

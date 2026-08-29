@@ -13,6 +13,7 @@ import unittest
 
 try:
     from causeway import api
+    from fastapi import HTTPException
 except ImportError:                                   # pragma: no cover
     api = None
 
@@ -127,6 +128,53 @@ class StreamingHeaderTests(unittest.TestCase):
         into one lump at the end."""
         self.assertEqual(api.SSE_HEADERS["X-Accel-Buffering"], "no")
         self.assertIn("no-transform", api.SSE_HEADERS["Cache-Control"])
+
+
+@unittest.skipIf(api is None, SKIP)
+class RepositoryRequestBodyTests(unittest.TestCase):
+    """start_investigation's optional {"repository_url": "..."} body. Called
+    directly (as every other test in this file does), FastAPI's own body
+    parsing never runs, so `payload` arrives exactly as a direct caller would
+    pass it - which is also what proves a call with no body at all (today's
+    frontend, and every other test here) is completely unaffected."""
+
+    def setUp(self):
+        self.original = api.manager
+        api.manager = RunManager(source=lambda repository_url=None: iter(
+            [{"type": "done", "elapsed_s": 0.0}]))
+
+    def tearDown(self):
+        api.manager.join(timeout=5)
+        api.manager = self.original
+
+    def test_no_payload_starts_the_bundled_demo(self):
+        response = api.start_investigation(payload=None)
+        self.assertEqual(response.status_code, 202)
+        api.manager.join(5)
+        self.assertEqual(api.manager.run.repository_url, "")
+
+    def test_an_empty_payload_starts_the_bundled_demo(self):
+        response = api.start_investigation(payload={})
+        self.assertEqual(response.status_code, 202)
+        api.manager.join(5)
+        self.assertEqual(api.manager.run.repository_url, "")
+
+    def test_a_repository_url_is_threaded_through_to_the_run(self):
+        response = api.start_investigation(payload={"repository_url": "https://github.com/foo/bar"})
+        self.assertEqual(response.status_code, 202)
+        api.manager.join(5)
+        self.assertEqual(api.manager.run.repository_url, "https://github.com/foo/bar")
+
+    def test_a_non_string_repository_url_is_a_400(self):
+        with self.assertRaises(HTTPException) as caught:
+            api.start_investigation(payload={"repository_url": 12345})
+        self.assertEqual(caught.exception.status_code, 400)
+
+    def test_a_non_dict_payload_is_treated_as_empty(self):
+        """Only reachable directly, never through real FastAPI routing (which
+        would already have rejected non-object JSON) - still must not crash."""
+        response = api.start_investigation(payload="not-a-dict")
+        self.assertEqual(response.status_code, 202)
 
 
 @unittest.skipIf(api is None, SKIP)

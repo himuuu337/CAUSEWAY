@@ -47,15 +47,26 @@ def _assignment_pattern(name: str) -> re.Pattern:
     return re.compile(r'^%s\s*=\s*"(.*)"\s*$' % re.escape(name), re.MULTILINE)
 
 
-def apply(target: str, after: str, workdir: str = None) -> AppliedFix:
+def apply(target: str, after: str, workdir: str = None,
+         source_path: str = None) -> AppliedFix:
     """Patch `target` to `after` in a disposable copy of the sandbox service.
 
     Callers are expected to have already validated `after` against the known
     safe repair for this target (`causeway.sandbox.repair.is_safe_after`) -
     this function's own job is only to apply an already-approved value
     without ever touching the real source file.
+
+    `source_path`, when given, reads the file to patch from that path
+    instead of the bundled `causeway.sandbox.service` module - this is how a
+    repository loaded through causeway.repository gets its own cloned
+    entrypoint patched. That file is still only ever read, never imported;
+    the same one-assignment regex substitution applies either way.
     """
-    source = inspect.getsource(service)
+    if source_path is None:
+        source = inspect.getsource(service)
+    else:
+        with open(source_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
     pattern = _assignment_pattern(target)
     matches = pattern.findall(source)
     if len(matches) != 1:

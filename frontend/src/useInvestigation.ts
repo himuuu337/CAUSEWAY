@@ -10,7 +10,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Assessment, Candidate, CausewayEvent, Exclusion, Fix, FixOperation,
-  FixVerdict, Health, Plan, Provenance, RunState, Validation, Verdict,
+  FixVerdict, Health, Plan, Provenance, RepositoryCandidateSummary, RunState,
+  Validation, Verdict,
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
@@ -72,6 +73,21 @@ export interface FixView {
   reason?: string
 }
 
+/** The repository lifecycle, folded from repository_* events only. `status`
+ * moves forward through validating -> cloning -> loaded, or stops at
+ * rejected - never both loaded and rejected at once. */
+export interface RepositoryView {
+  url: string
+  owner?: string
+  name?: string
+  commitSha?: string
+  service?: string
+  runtime?: string
+  candidates: RepositoryCandidateSummary[]
+  status: 'validating' | 'cloning' | 'loaded' | 'rejected'
+  rejection?: { stage: string; reason: string }
+}
+
 export interface PipelineStage {
   key: string
   label: string
@@ -100,6 +116,7 @@ export interface InvestigationState {
   fixes: Record<string, FixView>
   fixOrder: string[]
   activeFix: string | null
+  repository?: RepositoryView
   events: CausewayEvent[]
 }
 
@@ -355,6 +372,36 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.activeFix = null
       return next
 
+    case 'repository_validating':
+      next.repository = { url: event.url, candidates: [], status: 'validating' }
+      return next
+
+    case 'repository_cloning':
+      next.repository = {
+        ...(state.repository ?? { url: event.url, candidates: [] }),
+        owner: event.owner, name: event.name, status: 'cloning',
+      }
+      return next
+
+    case 'repository_loaded':
+      next.repository = {
+        ...(state.repository ?? { url: event.url, candidates: [] }),
+        owner: event.owner, name: event.name, commitSha: event.commit_sha,
+        service: event.service, runtime: event.runtime,
+        candidates: event.candidates, status: 'loaded',
+      }
+      return next
+
+    case 'repository_rejected':
+      // Surfaced by RepositoryPanel, not the generic error banner - it
+      // already shows the stage and reason clearly, and a rejection is not
+      // an engine crash.
+      next.repository = {
+        ...(state.repository ?? { url: '', candidates: [] }),
+        status: 'rejected', rejection: { stage: event.stage, reason: event.reason },
+      }
+      return next
+
     case 'error':
       next.error = event.message
       return next
@@ -474,10 +521,19 @@ export function useInvestigation() {
     }
   }, [closeStream])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (repositoryUrl?: string) => {
     setStarting(true)
     try {
-      const response = await fetch('/api/investigation', { method: 'POST' })
+      const trimmed = repositoryUrl?.trim()
+      const response = await fetch('/api/investigation', {
+        method: 'POST',
+        ...(trimmed
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ repository_url: trimmed }),
+            }
+          : {}),
+      })
       const body = await response.json().catch(() => ({}))
 
       // 409 means somebody (or another tab) already started one - follow it

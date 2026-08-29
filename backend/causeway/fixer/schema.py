@@ -10,7 +10,7 @@ fix verification's own result.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping, Tuple
+from typing import Any, Mapping, Optional, Tuple
 
 # Re-exported rather than duplicated: a fix proposal is rejected by the same
 # rule an experiment proposal is - no field the engine reads may carry a
@@ -64,6 +64,11 @@ class FixRequest:
     repair_targets: Tuple[str, ...]      # symbolic target names available to patch
     current_code: Mapping[str, str]      # target -> its current (broken) value
     mechanism: str                       # why this repair surface causes the incident
+    # None for the bundled demo (causeway.sandbox.repair.REPAIR_SURFACES).
+    # Set only when this request was built for a repository loaded through
+    # causeway.repository - its own manifest-declared repair surface,
+    # never trusted, always re-validated the same way the bundled one is.
+    surfaces: Optional[Mapping[str, Mapping[str, dict]]] = None
 
 
 @dataclass(frozen=True)

@@ -47,6 +47,11 @@ class Run:
     state: str = STATE_RUNNING
     error: str = ""
     finished_at: float = 0.0
+    # Empty for the bundled demo. Set only when this run was started against
+    # a GitHub repository - carried here so _drive knows whether to call the
+    # source with it, without the manager otherwise inspecting what the
+    # orchestrator does with it.
+    repository_url: str = ""
     events: List[dict] = field(default_factory=list)
     # Set once the terminal event has been appended. A reader that is caught up
     # on a closed run has everything there will ever be, and can stop waiting.
@@ -118,11 +123,12 @@ class RunManager:
             return list(self._run.events[index:])
 
     # -- lifecycle ---------------------------------------------------------
-    def start(self) -> Run:
+    def start(self, repository_url: str = None) -> Run:
         with self._lock:
             if self.is_running():
                 raise AlreadyRunning(self._run.id)
-            run = Run(id=uuid.uuid4().hex[:12], started_at=time.time())
+            run = Run(id=uuid.uuid4().hex[:12], started_at=time.time(),
+                     repository_url=repository_url or "")
             self._run = run
             self._thread = threading.Thread(
                 target=self._drive, args=(run,), daemon=True,
@@ -136,13 +142,18 @@ class RunManager:
 
     def _drive(self, run: Run) -> None:
         """Consume the orchestrator on this thread. Nothing here inspects an
-        event beyond noticing that the engine reported an error."""
+        event beyond noticing that the engine reported an error - a rejected
+        repository counts as one too, since nothing else happens after it."""
         failure = ""
         try:
-            for event in self._source():
+            source = (self._source(repository_url=run.repository_url)
+                     if run.repository_url else self._source())
+            for event in source:
                 self._append(run, event)
                 if event.get("type") == "error":
                     failure = event.get("message", "the engine reported an error")
+                elif event.get("type") == "repository_rejected":
+                    failure = event.get("reason", "the repository was rejected")
         except BaseException as exc:                  # noqa: BLE001 - never silent
             failure = "%s: %s" % (type(exc).__name__, exc)
             self._append(run, {"type": "error", "message": failure})

@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -83,15 +83,30 @@ def status() -> dict:
 # ------------------------------------------------------------- investigation
 
 @app.post("/api/investigation")
-def start_investigation():
+def start_investigation(payload: Optional[dict] = Body(default=None)):
     if not config.is_ready():
         raise HTTPException(
             status_code=503,
             detail={"reason": "not-seeded",
                     "message": "this machine is not seeded yet",
                     "hint": "run: python -m causeway.cli seed"})
+
+    # An optional {"repository_url": "..."} body. Absent, empty, or no body
+    # at all - exactly what today's frontend already sends, and exactly what
+    # a direct call (as the test suite makes) passes too, since `payload`
+    # is then the FastAPI Body() placeholder rather than a dict - means the
+    # bundled demo, same as before this field existed. A malformed JSON body
+    # never reaches here when served over HTTP: FastAPI rejects it with a
+    # 422 before this function runs.
+    body = payload if isinstance(payload, dict) else {}
+    repository_url = body.get("repository_url") or None
+    if repository_url is not None and not isinstance(repository_url, str):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason": "bad-request", "message": "repository_url must be a string"})
+
     try:
-        run = manager.start()
+        run = manager.start(repository_url=repository_url)
     except AlreadyRunning as exc:
         # Not an error anyone needs to act on: the client attaches to the run
         # that is already in progress rather than being told no.

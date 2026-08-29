@@ -137,7 +137,8 @@ def validate(raw: Mapping, request: FixRequest) -> FixValidationReport:
         "target %r is %sa bare symbolic name, never a filesystem path"
         % (target, "" if no_path else "NOT ")))
 
-    surface = repair.repair_surface(hypothesis, target) if no_path else None
+    surface = (repair.repair_surface(hypothesis, target, surfaces=request.surfaces)
+              if no_path else None)
     surface_ok = surface is not None and target in request.repair_targets
     checks.append(Check(
         "target_is_known_repair_surface", surface_ok,
@@ -152,13 +153,15 @@ def validate(raw: Mapping, request: FixRequest) -> FixValidationReport:
         "operation type %r is %san allowed, registered repair for this target"
         % (op_type, "" if type_ok else "NOT ")))
 
-    before_ok = surface_ok and repair.matches_current(hypothesis, target, before)
+    before_ok = surface_ok and repair.matches_current(hypothesis, target, before,
+                                                      surfaces=request.surfaces)
     checks.append(Check(
         "before_state_matches_sandbox", before_ok,
         "the proposed before-state %sthe sandbox fixture's current value"
         % ("matches " if before_ok else "does NOT match ")))
 
-    after_ok = surface_ok and repair.is_safe_after(hypothesis, target, after)
+    after_ok = surface_ok and repair.is_safe_after(hypothesis, target, after,
+                                                   surfaces=request.surfaces)
     checks.append(Check(
         "after_state_is_a_known_safe_repair", after_ok,
         "the proposed after-state is %sthe known-safe repair for this surface"

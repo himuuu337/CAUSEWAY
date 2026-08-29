@@ -25,7 +25,8 @@ class DeterministicFixPlanner:
 
     def propose(self, request: FixRequest, schema=None) -> dict:
         target = request.repair_targets[0]
-        surface = repair.repair_surface(request.hypothesis_id, target)
+        surface = repair.repair_surface(request.hypothesis_id, target,
+                                        surfaces=request.surfaces)
         before = request.current_code.get(target, "")
         after = surface["safe_after"]
         mechanism = surface["description"]
