@@ -1,28 +1,10 @@
-import { modelOf } from '../useInvestigation'
+import { memo } from 'react'
 import type { HypothesisView } from '../useInvestigation'
-import type { Provenance } from '../types'
+import { plannerDetail, plannerTagClass } from '../provenance'
 
 interface Props { views: HypothesisView[] }
 
-/**
- * Never call the configured planner a fallback, and never call anything Gemini
- * unless the backend reported `kind: "gemini"`. Claiming AI designed an
- * experiment that a deterministic planner designed would be the one dishonest
- * thing this interface could do.
- */
-function plannerLabel(provenance: Provenance): string {
-  if (provenance.used_fallback) return 'DETERMINISTIC FALLBACK'
-  if (provenance.kind === 'gemini') return `GEMINI · ${modelOf(provenance.source)}`
-  return 'DETERMINISTIC PLANNER'
-}
-
-function plannerClass(provenance: Provenance): string {
-  if (provenance.used_fallback) return 'planner-tag fallback'
-  if (provenance.kind === 'gemini') return 'planner-tag ai'
-  return 'planner-tag'
-}
-
-export default function PlanPanel({ views }: Props) {
+function PlanPanel({ views }: Props) {
   const withPlans = views.filter((view) => view.plan)
   if (withPlans.length === 0) return null
 
@@ -45,8 +27,8 @@ export default function PlanPanel({ views }: Props) {
                 <span className="cand-branch">HYPOTHESIS {view.id}</span>
                 <div className="spacer" style={{ flex: '1 1 auto' }} />
                 {view.provenance && (
-                  <span className={plannerClass(view.provenance)}>
-                    {plannerLabel(view.provenance)}
+                  <span className={plannerTagClass(view.provenance)}>
+                    {plannerDetail(view.provenance).label.toUpperCase()}
                   </span>
                 )}
               </div>
@@ -78,8 +60,7 @@ export default function PlanPanel({ views }: Props) {
 
               <blockquote className="quote">{plan.reasoning_summary}</blockquote>
               <div className="notice">
-                {view.provenance && view.provenance.kind === 'gemini'
-                  && !view.provenance.used_fallback
+                {view.provenance && plannerDetail(view.provenance).isAi
                   ? 'AI reasoning does not determine the verdict — it is quoted here and never read by the engine.'
                   : 'Planner reasoning does not determine the verdict — it is quoted here and never read by the engine.'}
               </div>
@@ -115,3 +96,5 @@ export default function PlanPanel({ views }: Props) {
     </section>
   )
 }
+
+export default memo(PlanPanel)
