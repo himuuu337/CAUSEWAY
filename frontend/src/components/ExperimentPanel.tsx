@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import type { HypothesisView, PhaseRow } from '../useInvestigation'
 import type { Candidate } from '../types'
 import { ms, share, times } from '../format'
@@ -11,17 +12,28 @@ interface Props {
 /** The three phases that carry evidence, in the order they are measured. */
 const EVIDENCE = ['reproduce', 'ablate', 'restore'] as const
 
-const STEP_WORD: Record<string, string> = {
+const STAGE_WORD: Record<string, string> = {
   reproduce: 'PRESENT', ablate: 'REMOVED', restore: 'RESTORED',
 }
-const STEP_SUB: Record<string, string> = {
-  reproduce: 'incident state reproduced',
-  ablate: 'this change removed, every other flag held fixed',
-  restore: 'the change put back',
-}
+
 const STATE_WORD: Record<string, string> = {
   broken: 'BROKEN', healthy: 'HEALTHY',
   inconclusive: 'INCONCLUSIVE', unstable: 'UNSTABLE',
+}
+
+/**
+ * How a phase's state reads in the summary. Phrasing only - the state itself
+ * arrived on a phase_judged event, already decided by the engine.
+ */
+function summaryWord(phase: string, state?: string): string {
+  if (!state) return '—'
+  if (state === 'broken') {
+    if (phase === 'ablate') return 'STILL BROKEN'
+    if (phase === 'restore') return 'BROKEN AGAIN'
+    return 'BROKEN'
+  }
+  if (state === 'healthy') return phase === 'reproduce' ? 'NOT REPRODUCED' : 'HEALTHY'
+  return STATE_WORD[state] ?? state.toUpperCase()
 }
 
 function rowOf(view: HypothesisView, phase: string): PhaseRow | undefined {
@@ -29,35 +41,30 @@ function rowOf(view: HypothesisView, phase: string): PhaseRow | undefined {
 }
 
 /**
- * The hero. Three bars, one per evidence phase, each with a dashed tick at the
- * exact control the backend judged it against.
+ * The hero: three stage cards, one per evidence phase, each carrying its own
+ * measurement, bar, state and ratio. A reads HIGH → HIGH → HIGH; B reads
+ * HIGH → LOW → HIGH, and that shape is the whole demo.
  *
- * Nothing on this panel is computed from measurements. Bar heights are a
- * proportion of the tallest number in the same experiment; every state word,
- * every ratio and the verdict itself arrived as an event.
+ * Bar width is the only thing derived here, and only as a proportion of the
+ * largest of the three measurements. Every number, every state word and the
+ * verdict itself arrived from the backend.
  */
 export default function ExperimentPanel({ view, candidate, active }: Props) {
   if (!view.started) return null
 
-  const values = view.phases
-    .map((row) => row.p95_ms)
+  const rows = EVIDENCE.map((phase) => rowOf(view, phase))
+  const values = rows
+    .map((row) => row?.p95_ms)
     .filter((value): value is number => value !== undefined)
   const max = values.length > 0 ? Math.max(...values) : 0
 
-  const points = EVIDENCE.map((phase, index) => {
-    const row = rowOf(view, phase)
-    const height = share(row?.p95_ms, max)
-    return `${16.7 + index * 33.3},${100 - height}`
-  }).join(' ')
-  const traceReady = EVIDENCE.every((phase) => rowOf(view, phase)?.p95_ms !== undefined)
-
   return (
     <section className="card exp">
-      <div className="card-head">
-        <div className="exp-title">
-          <span className="cand-id">{view.id}</span>
-          <span className="h">Controlled experiment</span>
-          {candidate && <span className="card-note mono">{candidate.branch}</span>}
+      <div className="exp-head">
+        <span className="cand-id">{view.id}</span>
+        <div>
+          <div className="exp-name">Controlled experiment</div>
+          {candidate && <div className="exp-branch">{candidate.branch}</div>}
         </div>
         <div className="spacer" />
         {view.verdict
@@ -67,86 +74,64 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
             </span>}
       </div>
 
-      <div className="exp-body">
-        <div>
-          <div className="plot">
-            {traceReady && (
-              <svg className="trace" viewBox="0 0 100 100" preserveAspectRatio="none">
-                <polyline
-                  points={points}
-                  fill="none"
-                  stroke="var(--text-faint)"
-                  strokeWidth="1.5"
-                  strokeDasharray="3 3"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            )}
-            {EVIDENCE.map((phase) => {
-              const row = rowOf(view, phase)
-              const state = row?.state ?? 'pending'
-              const height = share(row?.p95_ms, max)
-              const control = share(row?.localControlMs, max)
-              return (
-                <div className="plot-col" key={phase}>
-                  <div className="plot-value">
-                    {row?.p95_ms !== undefined ? ms(row.p95_ms) : row?.running ? '…' : ''}
-                  </div>
-                  <div className={`plot-bar ${state}`} style={{ height: `${height}%` }} />
-                  {row?.localControlMs !== undefined && (
-                    <div className="ctrl-tick" style={{ bottom: `${control}%` }}>
-                      <span>control {ms(row.localControlMs)}</span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+      <div className="stages">
+        {EVIDENCE.map((phase, index) => {
+          const row = rows[index]
+          const state = row?.state ?? 'pending'
+          const width = share(row?.p95_ms, max)
+          return (
+            <Fragment key={phase}>
+              {index > 0 && <div className="stage-sep" aria-hidden="true">&rarr;</div>}
+              <div className={`stage ${state}`}>
+                <div className="stage-name">{view.id} {STAGE_WORD[phase]}</div>
 
-          <div className="plot-axis">
-            {EVIDENCE.map((phase) => {
-              const row = rowOf(view, phase)
-              const state = row?.state
-              return (
-                <div key={phase}>
-                  <div className="axis-label">{view.id} {STEP_WORD[phase]}</div>
-                  <div className={`axis-state ${state ?? 'pending'}`}>
-                    {state ? STATE_WORD[state] ?? state.toUpperCase() : '—'}
-                  </div>
-                  <div className="axis-ratio">
-                    {row?.ratio != null ? `${times(row.ratio)} its local control` : ''}
-                  </div>
+                <div className={`stage-value${row?.p95_ms === undefined ? ' pending' : ''}`}>
+                  {row?.p95_ms !== undefined
+                    ? ms(row.p95_ms)
+                    : row?.running ? 'measuring…' : '—'}
                 </div>
-              )
-            })}
-          </div>
-        </div>
 
-        <div className="steps">
-          {EVIDENCE.map((phase, index) => {
-            const row = rowOf(view, phase)
-            const state = row?.state ?? 'pending'
-            return (
-              <div key={phase}>
-                {index > 0 && <div className="step-arrow">&darr;</div>}
-                <div className={`step ${state}`}>
-                  <div>
-                    <div className="step-name">{view.id} {STEP_WORD[phase]}</div>
-                    <div className="step-sub">{STEP_SUB[phase]}</div>
-                    <span className={`step-chip ${state}`}>
-                      {row?.state
-                        ? STATE_WORD[row.state] ?? row.state.toUpperCase()
-                        : row?.running ? 'MEASURING' : 'PENDING'}
-                    </span>
-                  </div>
-                  <div className="step-num">
-                    {row?.p95_ms !== undefined ? ms(row.p95_ms) : '—'}
-                    {row?.reps ? <div className="step-sub">{row.reps} reps</div> : null}
-                  </div>
+                <div className="stage-track">
+                  <div className={`stage-fill ${state}`} style={{ width: `${width}%` }} />
+                </div>
+
+                <div className={`stage-state ${state}`}>
+                  {row?.state ? STATE_WORD[row.state] ?? row.state.toUpperCase() : '—'}
+                </div>
+
+                <div className="stage-ratio">
+                  {row?.ratio != null ? `${times(row.ratio)} local control` : ''}
+                </div>
+                <div className="stage-control">
+                  {row?.localControlMs !== undefined
+                    ? `Local control: ${ms(row.localControlMs)}`
+                    : ''}
                 </div>
               </div>
-            )
-          })}
+            </Fragment>
+          )
+        })}
+      </div>
+
+      <div className="exp-summary">
+        <div className="summary-lines">
+          {EVIDENCE.map((phase, index) => (
+            <div key={phase}>
+              {view.id} {STAGE_WORD[phase]}
+              <span className="arrow">&rarr;</span>
+              <b className={rows[index]?.state ?? 'pending'}>
+                {summaryWord(phase, rows[index]?.state)}
+              </b>
+            </div>
+          ))}
+        </div>
+        <div className="summary-verdict">
+          <span className="label">VERDICT</span>
+          {view.verdict
+            ? <span className={`verdict-pill large ${view.verdict}`}>
+                {view.id} {view.verdict}
+              </span>
+            : <span className="verdict-pill large waiting">PENDING</span>}
         </div>
       </div>
 

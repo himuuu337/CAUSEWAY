@@ -119,7 +119,7 @@ body {
 .card-note { font-size: 11px; color: var(--text-faint); }
 .card-head .spacer { flex: 1 1 auto; }
 .section-title {
-  margin: 34px 0 0; font: 600 12px/1 var(--sans); letter-spacing: 0.16em;
+  margin: 40px 0 0; font: 600 12px/1 var(--sans); letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--text-dim);
 }
 .muted { color: var(--text-dim); }
@@ -225,62 +225,89 @@ body {
 
 /* ---------------------------------------------------------------- experiment */
 
-.exp { border-color: var(--line-strong); }
-.exp-title { display: flex; align-items: center; gap: 11px; }
-.exp-title .h { font: 600 15px/1 var(--sans); letter-spacing: 0.05em; color: var(--text); }
-.exp-body { display: grid; grid-template-columns: 1.15fr 1fr; gap: 26px; align-items: start; }
+/* Three self-contained stage cards and nothing else. No connector lines, no
+   overlay, no dashed rule crossing the graph: the shape of the three bars is
+   the argument, and anything drawn on top of them competes with it. Clipped at
+   the panel so nothing can reach the section below. */
 
-.plot { position: relative; height: 190px; display: flex; align-items: flex-end; gap: 20px; padding: 0 4px; }
-.plot-col { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
-.plot-bar { border-radius: 3px 3px 0 0; transition: height 420ms cubic-bezier(.3,.8,.4,1); }
-.plot-bar.broken { background: linear-gradient(180deg, #f85149 0%, #b3352f 100%); }
-.plot-bar.healthy { background: linear-gradient(180deg, #3fb950 0%, #247333 100%); }
-.plot-bar.pending { background: repeating-linear-gradient(45deg, #1e232b, #1e232b 5px, #262c35 5px, #262c35 10px); }
-.plot-bar.unstable, .plot-bar.inconclusive { background: linear-gradient(180deg, #d29922 0%, #8a660f 100%); }
-.plot-value { font: 600 13px/1 var(--mono); text-align: center; padding-bottom: 7px; }
-.control-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--green); opacity: 0.5; }
-.control-tag {
-  position: absolute; right: 0; transform: translateY(-100%);
-  font: 10px/1 var(--mono); color: var(--green); opacity: 0.85; padding-bottom: 3px;
+.exp { border-color: var(--line-strong); overflow: hidden; }
+
+.exp-head { display: flex; align-items: center; gap: 13px; margin-bottom: 22px; }
+.exp-name { font: 600 15px/1.2 var(--sans); letter-spacing: 0.03em; }
+.exp-branch { font: 12px/1.3 var(--mono); color: var(--text-faint); margin-top: 3px; }
+.exp-head .spacer { flex: 1 1 auto; }
+
+/* The arrows are grid items of their own, so all three cards stay equal width. */
+.stages {
+  display: grid;
+  grid-template-columns: 1fr 46px 1fr 46px 1fr;
+  align-items: stretch;
 }
-.trace { position: absolute; inset: 0; pointer-events: none; }
-.plot-axis { display: flex; gap: 20px; padding: 9px 4px 0; border-top: 1px solid var(--line); }
-.plot-axis > div { flex: 1 1 0; text-align: center; }
-.axis-label { font: 10.5px/1.3 var(--mono); letter-spacing: 0.05em; color: var(--text-dim); }
-.axis-state { font: 700 11px/1 var(--mono); letter-spacing: 0.08em; margin-top: 6px; }
-.axis-state.broken { color: var(--red); }
-.axis-state.healthy { color: var(--green); }
-.axis-state.unstable, .axis-state.inconclusive { color: var(--amber); }
-.axis-state.pending { color: var(--text-faint); }
-.axis-ratio { font: 10.5px/1 var(--mono); color: var(--text-faint); margin-top: 4px; }
-
-.steps { display: grid; gap: 9px; }
-.step {
-  display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
-  border: 1px solid var(--line); border-left-width: 3px; border-radius: 4px;
-  background: var(--panel-2); padding: 11px 13px;
+.stage-sep {
+  display: grid; place-items: center; color: var(--text-faint);
+  font-size: 19px; line-height: 1; user-select: none;
 }
-.step.broken { border-left-color: var(--red); }
-.step.healthy { border-left-color: var(--green); }
-.step.unstable, .step.inconclusive { border-left-color: var(--amber); }
-.step.pending { border-left-color: var(--line-strong); opacity: 0.65; }
-.step-name { font: 600 12px/1.2 var(--sans); letter-spacing: 0.06em; }
-.step-sub { font: 11px/1.3 var(--mono); color: var(--text-faint); margin-top: 3px; }
-.step-num { font: 600 15px/1 var(--mono); text-align: right; }
-.step-chip { font: 10px/1 var(--mono); letter-spacing: 0.08em; padding: 4px 6px; border-radius: 3px; margin-top: 5px; display: inline-block; }
-.step-chip.broken { background: var(--red-bg); color: var(--red); }
-.step-chip.healthy { background: var(--green-bg); color: var(--green); }
-.step-chip.unstable, .step-chip.inconclusive { background: var(--amber-bg); color: var(--amber); }
-.step-chip.pending { background: var(--panel); color: var(--text-faint); }
-.step-arrow { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1; }
+.stage {
+  min-width: 0; overflow: hidden;
+  border: 1px solid var(--line); border-top-width: 3px; border-radius: 5px;
+  background: var(--panel-2); padding: 18px 18px 17px;
+}
+.stage.broken { border-top-color: var(--red); }
+.stage.healthy { border-top-color: var(--green); }
+.stage.unstable, .stage.inconclusive { border-top-color: var(--amber); }
+.stage.pending { border-top-color: var(--line-strong); }
 
-.verdict-pill { font: 700 12px/1 var(--mono); letter-spacing: 0.12em; padding: 7px 12px; border-radius: 4px; border: 1px solid; }
+.stage-name {
+  font: 600 12px/1 var(--mono); letter-spacing: 0.12em; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stage-value {
+  font: 600 34px/1.15 var(--mono); letter-spacing: -0.02em; margin-top: 16px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stage-value.pending { font-size: 20px; color: var(--text-faint); }
+.stage-track {
+  height: 10px; margin-top: 15px; border-radius: 2px;
+  background: var(--bg-deep); overflow: hidden;
+}
+.stage-fill { height: 100%; border-radius: 2px; transition: width 420ms cubic-bezier(.3,.8,.4,1); }
+.stage-fill.broken { background: var(--red); }
+.stage-fill.healthy { background: var(--green); }
+.stage-fill.unstable, .stage-fill.inconclusive { background: var(--amber); }
+.stage-fill.pending { background: var(--line-strong); }
+
+.stage-state { font: 700 15px/1 var(--mono); letter-spacing: 0.1em; margin-top: 17px; }
+.stage-state.broken { color: var(--red); }
+.stage-state.healthy { color: var(--green); }
+.stage-state.unstable, .stage-state.inconclusive { color: var(--amber); }
+.stage-state.pending { color: var(--text-faint); }
+.stage-ratio { font: 12px/1 var(--mono); color: var(--text-dim); margin-top: 9px; min-height: 12px; }
+.stage-control { font: 11px/1 var(--mono); color: var(--text-faint); margin-top: 6px; min-height: 11px; }
+
+.exp-summary {
+  margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 30px; flex-wrap: wrap;
+}
+.summary-lines { display: grid; gap: 5px; font: 13px/1.5 var(--mono); color: var(--text-dim); }
+.summary-lines .arrow { color: var(--text-faint); padding: 0 9px; }
+.summary-lines b { font-weight: 700; }
+.summary-lines b.broken { color: var(--red); }
+.summary-lines b.healthy { color: var(--green); }
+.summary-lines b.unstable, .summary-lines b.inconclusive { color: var(--amber); }
+.summary-lines b.pending { color: var(--text-faint); }
+.summary-verdict { margin-left: auto; display: flex; align-items: center; gap: 13px; }
+.summary-verdict .label {
+  font: 11px/1 var(--mono); letter-spacing: 0.14em; color: var(--text-faint);
+}
+
+.verdict-pill { font: 700 12px/1 var(--mono); letter-spacing: 0.12em; padding: 7px 12px; border-radius: 4px; border: 1px solid; white-space: nowrap; }
+.verdict-pill.large { font-size: 16px; padding: 12px 19px; letter-spacing: 0.14em; }
 .verdict-pill.PROVEN { color: var(--green); border-color: var(--green); background: var(--green-bg); }
 .verdict-pill.REFUTED { color: var(--red); border-color: var(--red); background: var(--red-bg); }
 .verdict-pill.SUPPORTED { color: var(--blue); border-color: var(--blue); }
 .verdict-pill.UNRESOLVED { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
 .verdict-pill.waiting { color: var(--text-faint); border-color: var(--line-strong); }
-.verdict-reason { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text-dim); }
+.verdict-reason { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--text-dim); }
 
 /* -------------------------------------------------------------- phase detail */
 
@@ -358,20 +385,17 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 
 /* ------------------------------------------------------------------ narrower */
 
+@media (max-width: 1180px) {
+  .stages { grid-template-columns: 1fr; }
+  .stage-sep { transform: rotate(90deg); padding: 10px 0; }
+}
 @media (max-width: 1000px) {
-  .incident, .exp-body, .contrast { grid-template-columns: 1fr; }
+  .incident, .contrast { grid-template-columns: 1fr; }
   .contrast .left { border-right: 0; border-bottom: 1px solid var(--line-strong); }
+  .summary-verdict { margin-left: 0; }
 }
 @media (max-width: 620px) {
   .wrap { padding: 16px 14px 60px; }
   .pipeline { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .pipe-arrow { display: none; }
-}
-
-/* per-column control tick: the exact number the backend judged that phase against */
-.plot-col { position: relative; }
-.ctrl-tick { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--green); opacity: 0.55; }
-.ctrl-tick span {
-  position: absolute; right: 0; top: -12px; font: 9.5px/1 var(--mono);
-  color: var(--green); opacity: 0.9;
 }
