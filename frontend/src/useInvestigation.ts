@@ -4,8 +4,8 @@
  * Everything rendered comes out of the event buffer below. The reducer sorts
  * events into the shape the page wants; it never decides anything. There is no
  * verdict arithmetic here, no ratio, no threshold - a verdict appears on screen
- * only because the backend emitted one, and the "no client-side verdict" test
- * in the backend suite is the other half of that promise.
+ * only because the backend emitted one, and the import-graph test in the
+ * backend suite is the other half of that promise.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -14,27 +14,42 @@ import type {
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
+export type StageStatus = 'pending' | 'active' | 'done'
 
 export interface PhaseRow {
   phase: string
   role: 'control' | 'evidence'
   p95_ms?: number
+  p50_ms?: number
   reps?: number
   /** Present only once the control on the far side has also been measured. */
   state?: string
   ratio?: number | null
   localControlMs?: number
+  drift?: number
   running: boolean
 }
 
 export interface HypothesisView {
   id: string
   phases: PhaseRow[]
+  started: boolean
   plan?: Plan
   provenance?: Provenance
   validation?: Validation
+  intervention?: { flag: string; value: boolean }
+  holdingFixed?: string[]
   verdict?: Verdict
   reason?: string
+}
+
+export interface PipelineStage {
+  key: string
+  label: string
+  detail: string
+  /** Which side of the boundary this stage sits on. */
+  kind: 'code' | 'ai'
+  status: StageStatus
 }
 
 export interface InvestigationState {
@@ -51,6 +66,7 @@ export interface InvestigationState {
   topSuspect: string | null
   hypotheses: Record<string, HypothesisView>
   order: string[]
+  activeHypothesis: string | null
   conclusion?: Extract<CausewayEvent, { type: 'conclusion' }>
   events: CausewayEvent[]
 }
@@ -68,11 +84,17 @@ const EMPTY: InvestigationState = {
   topSuspect: null,
   hypotheses: {},
   order: [],
+  activeHypothesis: null,
   events: [],
 }
 
 function ensure(state: InvestigationState, id: string): HypothesisView {
-  return state.hypotheses[id] ?? { id, phases: [] }
+  return state.hypotheses[id] ?? { id, phases: [], started: false }
+}
+
+function withPhases(view: HypothesisView, phase: string,
+                    change: (row: PhaseRow) => PhaseRow): HypothesisView {
+  return { ...view, phases: view.phases.map((row) => row.phase === phase ? change(row) : row) }
 }
 
 /** Fold one event into the view. No event is interpreted beyond being filed. */
@@ -100,74 +122,92 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       return next
 
     case 'plan': {
-      const view = { ...ensure(state, event.hypothesis), plan: event.plan, provenance: event.provenance }
+      const view: HypothesisView = {
+        ...ensure(state, event.hypothesis),
+        plan: event.plan,
+        provenance: event.provenance,
+      }
       next.hypotheses = { ...state.hypotheses, [event.hypothesis]: view }
-      next.order = state.order.includes(event.hypothesis) ? state.order : [...state.order, event.hypothesis]
+      next.order = state.order.includes(event.hypothesis)
+        ? state.order
+        : [...state.order, event.hypothesis]
       return next
     }
 
     case 'validation': {
       const { checks, passed, total, accepted, reasoning_flagged } = event
-      const view = {
-        ...ensure(state, event.hypothesis),
-        validation: { checks, passed, total, accepted, reasoning_flagged },
+      next.hypotheses = {
+        ...state.hypotheses,
+        [event.hypothesis]: {
+          ...ensure(state, event.hypothesis),
+          validation: { checks, passed, total, accepted, reasoning_flagged },
+        },
       }
-      next.hypotheses = { ...state.hypotheses, [event.hypothesis]: view }
       return next
     }
 
     case 'experiment_start': {
-      const view = {
+      const view: HypothesisView = {
         ...ensure(state, event.hypothesis),
+        started: true,
+        intervention: event.intervention,
+        holdingFixed: event.holding_fixed,
         phases: event.phases.map((phase) => ({
           phase,
-          role: phase.startsWith('control') ? ('control' as const) : ('evidence' as const),
+          role: phase.indexOf('control') === 0 ? ('control' as const) : ('evidence' as const),
           running: false,
         })),
       }
       next.hypotheses = { ...state.hypotheses, [event.hypothesis]: view }
+      next.activeHypothesis = event.hypothesis
       return next
     }
 
-    case 'phase_start': {
-      const view = ensure(state, event.hypothesis)
-      const phases = view.phases.map((row) =>
-        row.phase === event.phase ? { ...row, running: true } : row,
-      )
-      next.hypotheses = { ...state.hypotheses, [event.hypothesis]: { ...view, phases } }
+    case 'phase_start':
+      next.hypotheses = {
+        ...state.hypotheses,
+        [event.hypothesis]: withPhases(ensure(state, event.hypothesis), event.phase,
+          (row) => ({ ...row, running: true })),
+      }
+      next.activeHypothesis = event.hypothesis
       return next
-    }
 
-    case 'phase_result': {
-      const view = ensure(state, event.hypothesis)
-      const phases = view.phases.map((row) =>
-        row.phase === event.phase
-          ? { ...row, running: false, p95_ms: event.p95_ms, reps: event.reps, role: event.role }
-          : row,
-      )
-      next.hypotheses = { ...state.hypotheses, [event.hypothesis]: { ...view, phases } }
+    case 'phase_result':
+      next.hypotheses = {
+        ...state.hypotheses,
+        [event.hypothesis]: withPhases(ensure(state, event.hypothesis), event.phase,
+          (row) => ({
+            ...row, running: false, role: event.role,
+            p95_ms: event.p95_ms, p50_ms: event.p50_ms, reps: event.reps,
+          })),
+      }
       return next
-    }
 
-    case 'phase_judged': {
-      const view = ensure(state, event.hypothesis)
-      const phases = view.phases.map((row) =>
-        row.phase === event.phase
-          ? { ...row, state: event.state, ratio: event.ratio, localControlMs: event.local_control_ms }
-          : row,
-      )
-      next.hypotheses = { ...state.hypotheses, [event.hypothesis]: { ...view, phases } }
+    case 'phase_judged':
+      next.hypotheses = {
+        ...state.hypotheses,
+        [event.hypothesis]: withPhases(ensure(state, event.hypothesis), event.phase,
+          (row) => ({
+            ...row, state: event.state, ratio: event.ratio,
+            localControlMs: event.local_control_ms, drift: event.drift,
+          })),
+      }
       return next
-    }
 
-    case 'verdict': {
-      const view = { ...ensure(state, event.hypothesis), verdict: event.verdict, reason: event.reason }
-      next.hypotheses = { ...state.hypotheses, [event.hypothesis]: view }
+    case 'verdict':
+      next.hypotheses = {
+        ...state.hypotheses,
+        [event.hypothesis]: {
+          ...ensure(state, event.hypothesis),
+          verdict: event.verdict,
+          reason: event.reason,
+        },
+      }
       return next
-    }
 
     case 'conclusion':
       next.conclusion = event
+      next.activeHypothesis = null
       return next
 
     case 'error':
@@ -184,6 +224,49 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
   }
 }
 
+/**
+ * The trust pipeline, derived only from events that have actually arrived.
+ *
+ * The planner's label is whatever the backend said its provenance was. A
+ * deterministic run is never called a fallback, and nothing is ever called
+ * Gemini unless the backend reported `kind: "gemini"`.
+ */
+function pipelineOf(state: InvestigationState): PipelineStage[] {
+  const stage = (name: string): StageStatus =>
+    state.stages[name] === 'done' ? 'done'
+      : state.stages[name] === 'running' ? 'active' : 'pending'
+
+  const views = state.order.map((id) => state.hypotheses[id]).filter(Boolean)
+  const measured = views.some((view) => view.phases.some((row) => row.p95_ms !== undefined))
+  const verdicts = views.filter((view) => view.verdict !== undefined).length
+  const expected = state.candidates.length
+
+  const provenance = views.find((view) => view.provenance)?.provenance
+  let plannerDetail = 'Awaiting plan'
+  let plannerKind: 'code' | 'ai' = 'ai'
+  if (provenance) {
+    if (provenance.used_fallback) plannerDetail = 'Deterministic Fallback'
+    else if (provenance.kind === 'gemini') plannerDetail = `Gemini · ${provenance.source}`
+    else plannerDetail = 'Deterministic Planner'
+    plannerKind = provenance.kind === 'gemini' && !provenance.used_fallback ? 'ai' : 'code'
+  }
+
+  return [
+    { key: 'localizer', label: 'LOCALIZER', detail: 'Deterministic', kind: 'code',
+      status: stage('localization') },
+    { key: 'planner', label: 'PLANNER', detail: plannerDetail, kind: plannerKind,
+      status: stage('planning') },
+    { key: 'validator', label: 'VALIDATOR', detail: 'Deterministic', kind: 'code',
+      status: stage('validation') },
+    { key: 'sandbox', label: 'SANDBOX', detail: 'Controlled execution', kind: 'code',
+      status: stage('experiment') },
+    { key: 'measurements', label: 'MEASUREMENTS', detail: 'Deterministic', kind: 'code',
+      status: stage('experiment') === 'done' ? 'done' : measured ? 'active' : 'pending' },
+    { key: 'verdict', label: 'VERDICT', detail: 'Deterministic', kind: 'code',
+      status: expected > 0 && verdicts >= expected ? 'done' : verdicts > 0 ? 'active' : 'pending' },
+  ]
+}
+
 export function useInvestigation() {
   const [state, setState] = useState<InvestigationState>(EMPTY)
   const [health, setHealth] = useState<Health | null>(null)
@@ -195,17 +278,12 @@ export function useInvestigation() {
     sourceRef.current = null
   }, [])
 
-  const attach = useCallback((runId: string, resume = false) => {
+  const attach = useCallback((runId: string) => {
     closeStream()
-    setState((previous) => ({
-      ...(resume ? previous : EMPTY),
-      runId,
-      runState: 'running',
-      connection: 'connecting',
-      error: null,
-    }))
+    setState({ ...EMPTY, runId, runState: 'running', connection: 'connecting' })
 
-    const source = new EventSource(`/api/investigation/stream?run_id=${encodeURIComponent(runId)}`)
+    const source = new EventSource(
+      `/api/investigation/stream?run_id=${encodeURIComponent(runId)}`)
     sourceRef.current = source
 
     source.onopen = () => setState((previous) => ({ ...previous, connection: 'open' }))
@@ -228,12 +306,14 @@ export function useInvestigation() {
 
     source.onerror = () => {
       // EventSource retries on its own and resends Last-Event-ID, so the
-      // backend can hand back exactly the events this client missed.
+      // backend hands back exactly the events this client missed.
       setState((previous) =>
         previous.runState === 'running'
-          ? { ...previous, connection: source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting' }
-          : previous,
-      )
+          ? {
+              ...previous,
+              connection: source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting',
+            }
+          : previous)
     }
   }, [closeStream])
 
@@ -243,13 +323,9 @@ export function useInvestigation() {
       const response = await fetch('/api/investigation', { method: 'POST' })
       const body = await response.json().catch(() => ({}))
 
-      if (response.status === 202) {
-        attach(body.run_id)
-        return
-      }
-      if (response.status === 409) {
-        // Somebody (or another tab) already started one. Follow it from the
-        // beginning rather than refusing.
+      // 409 means somebody (or another tab) already started one - follow it
+      // rather than refusing.
+      if (response.status === 202 || response.status === 409) {
         attach(body.run_id)
         return
       }
@@ -257,13 +333,12 @@ export function useInvestigation() {
       setState((previous) => ({
         ...previous,
         error: detail?.message
-          ? `${detail.message}${detail.hint ? ` - ${detail.hint}` : ''}`
+          ? `${detail.message}${detail.hint ? ` — ${detail.hint}` : ''}`
           : `the backend refused to start an investigation (HTTP ${response.status})`,
       }))
     } catch (problem) {
       setState((previous) => ({
-        ...previous,
-        error: `cannot reach the backend: ${String(problem)}`,
+        ...previous, error: `cannot reach the backend: ${String(problem)}`,
       }))
     } finally {
       setStarting(false)
@@ -278,7 +353,9 @@ export function useInvestigation() {
       .then((body: Health) => { if (!cancelled) setHealth(body) })
       .catch(() => {
         if (!cancelled) {
-          setState((previous) => ({ ...previous, error: 'cannot reach the backend on /api/health' }))
+          setState((previous) => ({
+            ...previous, error: 'cannot reach the backend on /api/health',
+          }))
         }
       })
     fetch('/api/status')
@@ -287,13 +364,13 @@ export function useInvestigation() {
         if (!cancelled && body?.state === 'running' && body.run_id) attach(body.run_id)
       })
       .catch(() => undefined)
-    return () => { cancelled = true; }
+    return () => { cancelled = true }
   }, [attach])
 
   useEffect(() => closeStream, [closeStream])
 
+  const pipeline = useMemo(() => pipelineOf(state), [state])
   const busy = starting || state.runState === 'running'
-  const stageList = useMemo(() => Object.entries(state.stages), [state.stages])
 
-  return { state, health, busy, starting, start, stageList }
+  return { state, health, busy, starting, start, pipeline }
 }

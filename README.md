@@ -15,19 +15,46 @@ comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
 the module that produces the verdict and fails the build if anything
 model-shaped, networked or planner-shaped becomes reachable from it.
 
-## Status: Milestone 2
+## Status: Milestone 3
 
-The causal core, and a live investigation streamed to a browser. The interface
-is deliberately unstyled - Milestone 2 is about proving the wire carries real
-measurements, not about how they look.
+The causal core, a live investigation streamed to a browser, and the dashboard
+that explains it.
 
 | | |
 |---|---|
 | Milestone 1 | causal core, CLI-verified · **done** |
 | Milestone 2 | API + SSE + frontend shell · **done** |
-| Milestone 3 | the investigation dashboard |
+| Milestone 3 | the investigation dashboard · **done** |
 | Milestone 4 | Gemini planner behind the existing validator |
 | Milestone 5 | fix generation and fix verification (stretch) |
+
+## What the dashboard shows, and what it is not allowed to do
+
+The page builds itself from Server-Sent Events while a real investigation runs:
+the incident's measured latency, the localised candidates, the observational
+ranking, the experiment plan and its provenance, the validator's checks, then
+seven measured phases per candidate, then the verdicts, then the contrast.
+
+The rule the interface is built around is that it renders and never reasons:
+
+- **No verdict is computed in the browser.** `PROVEN` appears because the
+  backend emitted `{"type": "verdict", "verdict": "PROVEN"}`. The frontend has
+  no thresholds, no ratios and no decision table.
+- **No phase state is inferred.** `BROKEN` and `HEALTHY` arrive on
+  `phase_judged` events, already decided against the control the engine
+  measured beside that phase.
+- **Nothing appears before the event that carries it.** Bars are empty until a
+  measurement lands; a verdict pill reads `MEASURING…` until the verdict
+  arrives. A backend test asserts no verdict word appears anywhere in the
+  stream before the first measurement.
+- **The planner is labelled by provenance, never by assumption.** A
+  deterministic run is called a *Deterministic Planner*; only a run where
+  `used_fallback` is true is called a *Deterministic Fallback*; and nothing is
+  ever called Gemini unless the backend reported `kind: "gemini"`.
+
+Bar heights are the one thing the page derives, and only as a proportion of
+the largest measurement in the same experiment. Every number printed beside
+them is the backend's.
 
 ## Running it
 
