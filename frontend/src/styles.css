@@ -368,42 +368,6 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .chain-step .v { margin-top: 4px; }
 .chain-link { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1.9; }
 
-/* -------------------------------------------------------------- fix loop */
-
-.fix-card { border-color: var(--violet); }
-.fix-chain { display: flex; flex-direction: column; }
-.fix-chain-step { border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); padding: 10px 14px; font-size: 13px; }
-.fix-chain-step .k { font: 11px/1 var(--mono); color: var(--text-faint); letter-spacing: 0.08em; }
-.fix-chain-step .v { margin-top: 4px; }
-.fix-chain-link { text-align: center; color: var(--text-faint); font-size: 13px; line-height: 1.9; }
-
-.patch-review {
-  margin-top: 13px; border: 1px solid var(--line); border-radius: 4px;
-  background: var(--bg-deep); overflow: hidden;
-}
-.patch-label {
-  padding: 7px 12px; font: 11px/1 var(--mono); color: var(--text-faint);
-  letter-spacing: 0.04em; border-bottom: 1px solid var(--line);
-}
-.patch-lines { padding: 4px 0; }
-.patch-line {
-  padding: 4px 12px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word;
-}
-.patch-line.before { color: #ffb3ae; background: var(--red-bg); }
-.patch-line.after { color: #b8f0bd; background: var(--green-bg); }
-
-.fix-stages { grid-template-columns: 1fr 46px 1fr; }
-
-.verdict-pill.fix-VERIFIED { color: var(--green); border-color: var(--green); background: var(--green-bg); }
-.verdict-pill.fix-FAILED { color: var(--red); border-color: var(--red); background: var(--red-bg); }
-.verdict-pill.fix-UNRESOLVED { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
-
-.sandbox-notice {
-  margin-top: 14px; padding: 10px 13px; border-radius: var(--radius);
-  border: 1px solid var(--violet); background: var(--violet-bg); color: var(--violet);
-  font: 11px/1.5 var(--mono); letter-spacing: 0.02em;
-}
-
 /* ------------------------------------------------------------------- roadmap */
 
 .roadmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
@@ -434,4 +398,63 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
   .wrap { padding: 16px 14px 60px; }
   .pipeline { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .pipe-arrow { display: none; }
+}
+
+/* -------------------------------------------------------------- accessibility */
+
+/* Every interactive element gets a visible, consistent keyboard focus ring -
+   the dark palette has no reliable default browser outline. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* --------------------------------------------------------------- banner extras */
+
+.banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.banner-hint { color: inherit; opacity: 0.85; }
+.banner-retry {
+  margin-left: auto; font: 600 11px/1 var(--mono); letter-spacing: 0.06em;
+  padding: 6px 12px; border-radius: 4px; border: 1px solid var(--red);
+  background: transparent; color: #ffb3ae; cursor: pointer;
+}
+.banner-retry:hover { background: var(--red-bg); }
+
+/* ------------------------------------------------------------- verdict arrival */
+
+/* A verdict is the single most important thing that appears on this page - it
+   should read as an event, not just another badge. One short, restrained pop;
+   respects reduced-motion. */
+@keyframes verdict-pop {
+  0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+  55% { transform: scale(1.06); }
+  100% { transform: scale(1); box-shadow: 0 0 0 6px rgba(255,255,255,0); }
+}
+.verdict-pill-arrive { animation: verdict-pop 420ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .verdict-pill-arrive { animation: none; }
+}
+
+/* ------------------------------------------------------------------- skeleton */
+
+.skeleton-masthead { display: flex; gap: 26px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.sk {
+  background: linear-gradient(90deg, var(--panel) 0%, var(--panel-2) 50%, var(--panel) 100%);
+  background-size: 200% 100%; border-radius: var(--radius);
+  animation: sk-shimmer 1.6s ease-in-out infinite;
+}
+.sk-title { width: 220px; height: 26px; }
+.sk-badges { width: 260px; height: 26px; margin-left: auto; }
+.sk-button { width: 100%; max-width: 320px; height: 48px; margin: 20px 0 8px; }
+.sk-card { width: 100%; height: 96px; margin-top: var(--gap); }
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sk { animation: none; }
 }
