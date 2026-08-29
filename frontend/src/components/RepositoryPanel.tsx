@@ -8,12 +8,21 @@ const STATUS_WORD: Record<string, string> = {
 }
 
 /**
- * The repository lifecycle, rendered from repository_* events only. Every
- * field here - owner, name, commit, service, runtime, the candidate list -
- * arrived on repository_loaded exactly as the backend's manifest validator
- * accepted it. Nothing is guessed while a clone is still in flight, and a
- * rejected repository never pretends to have loaded.
+ * The repository lifecycle, rendered from repository_* events only.
+ *
+ * Every field here arrived on repository_loaded exactly as the backend's
+ * manifest validator accepted it, or as the database builder reported after
+ * building it. There is no candidate list: a manifest is forbidden from
+ * declaring suspects, and the ones on screen were read out of the source by
+ * the detectors instead. Nothing is guessed while a clone is still in
+ * flight, and a rejected repository never pretends to have loaded.
  */
+function bytesOf(count: number): string {
+  if (count >= 1024 * 1024) return `${(count / (1024 * 1024)).toFixed(1)} MB`
+  if (count >= 1024) return `${Math.round(count / 1024)} KB`
+  return `${count} B`
+}
+
 export default function RepositoryPanel({ view }: Props) {
   return (
     <section className="card repo-card">
@@ -56,24 +65,53 @@ export default function RepositoryPanel({ view }: Props) {
               <span className="v">{view.service} · {view.runtime}</span>
             </div>
           )}
+          {view.entrypoint && (
+            <div className="repo-meta-row">
+              <span className="k">RUNS</span>
+              <span className="v mono">python {view.entrypoint}</span>
+            </div>
+          )}
+          {view.sources.length > 0 && (
+            <div className="repo-meta-row">
+              <span className="k">ANALYSED</span>
+              <span className="v mono">{view.sources.join(', ')}</span>
+            </div>
+          )}
+          {view.patchable.length > 0 && (
+            <div className="repo-meta-row">
+              <span className="k">PATCHABLE</span>
+              <span className="v mono">{view.patchable.join(', ')}</span>
+            </div>
+          )}
+          {view.database && (
+            <div className="repo-meta-row">
+              <span className="k">DATABASE</span>
+              <span className="v mono">
+                {view.database.engine} · {bytesOf(view.database.bytes)} ·{' '}
+                {Object.entries(view.database.tables)
+                  .map(([table, rows]) => `${table} ${rows.toLocaleString()} rows`)
+                  .join(' · ')}
+              </span>
+            </div>
+          )}
+          {view.workload && (
+            <div className="repo-meta-row">
+              <span className="k">WORKLOAD</span>
+              <span className="v mono">
+                {view.workload.id} · {view.workload.requests} requests ·
+                {' '}concurrency {view.workload.concurrency}
+              </span>
+            </div>
+          )}
           {view.status === 'loaded' && (
             <div className="repo-meta-row">
               <span className="k good">&#10003;</span>
-              <span className="v good">Supported Causeway project</span>
+              <span className="v good">
+                Built from this repository&apos;s own schema and seed — Causeway&apos;s
+                bundled fixture is not used on this path
+              </span>
             </div>
           )}
-        </div>
-      )}
-
-      {view.candidates.length > 0 && (
-        <div className="repo-candidates">
-          {view.candidates.map((c) => (
-            <div key={c.change_id} className="repo-candidate">
-              <span className="cand-id small">{c.change_id}</span>
-              <span className="repo-candidate-branch mono">{c.branch}</span>
-              <span className="small faint">{c.summary}</span>
-            </div>
-          ))}
         </div>
       )}
     </section>

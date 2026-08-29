@@ -480,3 +480,95 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
   .pipeline { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .pipe-arrow { display: none; }
 }
+
+/* ------------------------------------------------------------------ intent
+
+   The user's own instruction, and the two kinds of constraint it can carry.
+   Enforced and advisory are styled differently on purpose: one is checked in
+   code before anything is written, the other is only recorded, and the page
+   must not let them read as the same promise. */
+
+.mode-select {
+  flex: 0 0 auto; font: 12px/1 var(--mono); padding: 11px 12px;
+  border-radius: var(--radius); border: 1px solid var(--line-strong);
+  background: var(--panel-2); color: var(--text);
+}
+.mode-select:disabled { color: var(--text-faint); cursor: not-allowed; }
+.hint.indent { color: var(--text-faint); font-size: 12px; margin: 2px 0 0 132px; }
+
+.intent-card { border-color: var(--line-strong); }
+.intent-card.intent-ambiguous { border-color: var(--amber); }
+.verdict-pill.intent-diagnose_only { color: var(--blue); border-color: var(--blue); }
+.verdict-pill.intent-diagnose_and_fix { color: var(--violet); border-color: var(--violet); background: var(--violet-bg); }
+.verdict-pill.intent-requested_change { color: var(--blue); border-color: var(--blue); }
+.verdict-pill.intent-needs_clarification { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+
+.intent-quote {
+  margin: 0 0 14px; padding: 10px 14px; border-left: 3px solid var(--blue);
+  background: var(--panel-2); border-radius: 0 4px 4px 0;
+  font: 14px/1.5 var(--sans); color: var(--text);
+}
+.intent-grid { display: grid; gap: 8px; }
+.notice.intent-question {
+  margin-top: 4px; padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--amber); background: var(--amber-bg); color: #f0d79a;
+  font-size: 13px;
+}
+
+.constraint-block { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.constraint-title { font: 700 11px/1 var(--mono); letter-spacing: 0.1em; color: var(--green); margin-bottom: 8px; }
+.constraint-title.faint { color: var(--text-faint); }
+.constraint-row { display: flex; align-items: baseline; gap: 12px; font-size: 13px; padding: 4px 0; flex-wrap: wrap; }
+.constraint-row.enforced .constraint-kind { color: var(--green); }
+.constraint-row.advisory .constraint-value { color: var(--text-dim); }
+.constraint-kind { font-size: 12px; letter-spacing: 0.04em; min-width: 170px; }
+.constraint-value { color: var(--text); }
+
+/* ------------------------------------------------- suspect code locations */
+
+.hyp-caveat { margin: 0 0 14px; }
+.hyp-list { display: grid; gap: 12px; }
+.hyp-row { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 12px 14px; }
+.hyp-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.hyp-label { font-size: 13.5px; color: var(--text); }
+.hyp-flag { font: 700 10.5px/1 var(--mono); letter-spacing: 0.1em; padding: 5px 9px; border-radius: 3px; border: 1px solid; }
+.hyp-flag.ok { color: var(--green); border-color: var(--green); }
+.hyp-flag.off { color: var(--text-faint); border-color: var(--line-strong); }
+
+.hyp-code { display: flex; align-items: baseline; gap: 12px; margin: 4px 0; flex-wrap: wrap; }
+.hyp-code-label { font: 11px/1 var(--mono); letter-spacing: 0.08em; color: var(--text-faint); width: 80px; flex: 0 0 auto; }
+.hyp-observed, .hyp-counterfactual {
+  font: 12.5px/1.4 var(--mono); padding: 3px 8px; border-radius: 3px; border: 1px solid;
+}
+.hyp-observed { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+.hyp-counterfactual { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.hyp-reason { margin-top: 10px; }
+.hyp-detector { margin-top: 6px; font-size: 11.5px; word-break: break-all; }
+.hyp-footer { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* the edit an experiment actually performs, shown above its stage cards */
+.exp-edit {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--line-strong);
+  border-radius: var(--radius); background: var(--bg-deep);
+}
+.exp-edit-label { font: 700 10.5px/1 var(--mono); letter-spacing: 0.1em; color: var(--text-faint); }
+
+/* ------------------------------------------------------------------- diff */
+
+.patch-diff { margin-top: 14px; }
+.patch-diff > summary {
+  cursor: pointer; font: 12px/1 var(--mono); letter-spacing: 0.06em;
+  color: var(--text-dim); padding: 8px 0;
+}
+.patch-diff > summary:hover { color: var(--text); }
+.diff {
+  margin: 8px 0 0; padding: 10px 0; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-deep); font: 12.5px/1.55 var(--mono);
+}
+.diff > div { padding: 0 14px; white-space: pre; }
+.diff-add { color: var(--green); background: var(--green-bg); }
+.diff-del { color: var(--red); background: var(--red-bg); }
+.diff-hunk { color: var(--blue); }
+.diff-ctx { color: var(--text-dim); }

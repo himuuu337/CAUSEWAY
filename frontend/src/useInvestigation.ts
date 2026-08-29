@@ -9,9 +9,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  Assessment, Candidate, CausewayEvent, Exclusion, Fix, FixOperation,
-  FixVerdict, Health, Plan, Provenance, RepositoryCandidateSummary, RunState,
-  Validation, Verdict,
+  AppliedEdit, Assessment, Candidate, CausewayEvent, CodeHypothesis,
+  DatabaseSummary, Exclusion, Fix, FixOperation, FixVerdict, Health,
+  IntentMode, IntentSpec, Intervention, Plan, Provenance, RunState,
+  Validation, Verdict, WorkloadSummary,
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
@@ -29,6 +30,9 @@ export interface PhaseRow {
   localControlMs?: number
   drift?: number
   running: boolean
+  /** How this phase's state was put into effect: flags, or source edits. */
+  intervention?: Intervention
+  applied?: AppliedEdit[]
 }
 
 export interface HypothesisView {
@@ -42,6 +46,8 @@ export interface HypothesisView {
   holdingFixed?: string[]
   verdict?: Verdict
   reason?: string
+  /** Present only on the repository path: the location under test. */
+  code?: CodeHypothesis
 }
 
 /** The fix loop's own phase row - same shape as PhaseRow, kept separate so a
@@ -57,6 +63,8 @@ export interface FixPhaseRow {
   localControlMs?: number
   drift?: number
   running: boolean
+  /** Whether this phase ran against the patched build. Backend-supplied. */
+  patched?: boolean
 }
 
 export interface FixView {
@@ -71,6 +79,12 @@ export interface FixView {
   phases: FixPhaseRow[]
   verdict?: FixVerdict
   reason?: string
+  /** Repository path only: the patch as a human would review it. */
+  diff?: string
+  file?: string
+  label?: string
+  /** Set when a fix was never proposed, and why. */
+  blocked?: { scope: 'intent' | 'repository'; reason: string }
 }
 
 /** The repository lifecycle, folded from repository_* events only. `status`
@@ -83,7 +97,12 @@ export interface RepositoryView {
   commitSha?: string
   service?: string
   runtime?: string
-  candidates: RepositoryCandidateSummary[]
+  verification?: string
+  entrypoint?: string
+  sources: string[]
+  patchable: string[]
+  database?: DatabaseSummary
+  workload?: WorkloadSummary
   status: 'validating' | 'cloning' | 'loaded' | 'rejected'
   rejection?: { stage: string; reason: string }
 }
@@ -117,6 +136,12 @@ export interface InvestigationState {
   fixOrder: string[]
   activeFix: string | null
   repository?: RepositoryView
+  /** Repository path only. */
+  intent?: IntentSpec
+  clarification?: { question: string; modes: string[] }
+  found: CodeHypothesis[]
+  detectors: string[]
+  fixSkipped?: { reason: string; mode: IntentMode }
   events: CausewayEvent[]
 }
 
@@ -137,6 +162,8 @@ const EMPTY: InvestigationState = {
   fixes: {},
   fixOrder: [],
   activeFix: null,
+  found: [],
+  detectors: [],
   events: [],
 }
 
@@ -182,6 +209,21 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.topSuspect = event.top_suspect
       return next
 
+    case 'intent':
+      // Filed exactly as parsed. The interface never re-reads the
+      // instruction and never decides a mode of its own.
+      next.intent = event
+      return next
+
+    case 'needs_clarification':
+      next.clarification = { question: event.question, modes: event.modes }
+      return next
+
+    case 'hypotheses':
+      next.found = event.hypotheses
+      next.detectors = event.detectors
+      return next
+
     case 'plan': {
       const view: HypothesisView = {
         ...ensure(state, event.hypothesis),
@@ -213,6 +255,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
         started: true,
         intervention: event.intervention,
         holdingFixed: event.holding_fixed,
+        code: state.found.find((h) => h.id === event.hypothesis),
         phases: event.phases.map((phase) => ({
           phase,
           role: phase.indexOf('control') === 0 ? ('control' as const) : ('evidence' as const),
@@ -228,7 +271,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.hypotheses = {
         ...state.hypotheses,
         [event.hypothesis]: withPhases(ensure(state, event.hypothesis), event.phase,
-          (row) => ({ ...row, running: true })),
+          (row) => ({ ...row, running: true, intervention: event.intervention })),
       }
       next.activeHypothesis = event.hypothesis
       return next
@@ -240,6 +283,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
           (row) => ({
             ...row, running: false, role: event.role,
             p95_ms: event.p95_ms, p50_ms: event.p50_ms, reps: event.reps,
+            applied: event.applied,
           })),
       }
       return next
@@ -271,8 +315,27 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.activeHypothesis = null
       return next
 
+    case 'fix_skipped':
+      next.fixSkipped = { reason: event.reason, mode: event.mode }
+      return next
+
+    case 'fix_blocked':
+      next.fixes = {
+        ...state.fixes,
+        [event.hypothesis]: {
+          ...ensureFix(state, event.hypothesis),
+          blocked: { scope: event.scope, reason: event.reason },
+          file: event.file,
+        },
+      }
+      return next
+
     case 'root_cause_proven': {
-      const view: FixView = { ...ensureFix(state, event.hypothesis), causalVerdict: event.verdict }
+      const view: FixView = {
+        ...ensureFix(state, event.hypothesis),
+        causalVerdict: event.verdict,
+        label: event.label,
+      }
       next.fixes = { ...state.fixes, [event.hypothesis]: view }
       next.fixOrder = state.fixOrder.includes(event.hypothesis)
         ? state.fixOrder
@@ -309,6 +372,9 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
           ...ensureFix(state, event.hypothesis),
           operation: event.operation,
           applySummary: event.summary,
+          diff: event.diff,
+          file: event.file,
+          label: event.label ?? state.fixes[event.hypothesis]?.label,
         },
       }
       return next
@@ -333,7 +399,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.fixes = {
         ...state.fixes,
         [event.hypothesis]: withFixPhases(ensureFix(state, event.hypothesis), event.phase,
-          (row) => ({ ...row, running: true })),
+          (row) => ({ ...row, running: true, patched: event.patched })),
       }
       next.activeFix = event.hypothesis
       return next
@@ -345,6 +411,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
           (row) => ({
             ...row, running: false, role: event.role,
             p95_ms: event.p95_ms, p50_ms: event.p50_ms, reps: event.reps,
+            patched: event.patched ?? row.patched,
           })),
       }
       return next
@@ -373,22 +440,25 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       return next
 
     case 'repository_validating':
-      next.repository = { url: event.url, candidates: [], status: 'validating' }
+      next.repository = { url: event.url, sources: [], patchable: [], status: 'validating' }
       return next
 
     case 'repository_cloning':
       next.repository = {
-        ...(state.repository ?? { url: event.url, candidates: [] }),
+        ...(state.repository ?? { url: event.url, sources: [], patchable: [] }),
         owner: event.owner, name: event.name, status: 'cloning',
       }
       return next
 
     case 'repository_loaded':
       next.repository = {
-        ...(state.repository ?? { url: event.url, candidates: [] }),
+        ...(state.repository ?? { url: event.url, sources: [], patchable: [] }),
         owner: event.owner, name: event.name, commitSha: event.commit_sha,
         service: event.service, runtime: event.runtime,
-        candidates: event.candidates, status: 'loaded',
+        verification: event.verification, entrypoint: event.entrypoint,
+        sources: event.sources, patchable: event.patchable,
+        database: event.database, workload: event.workload,
+        status: 'loaded',
       }
       return next
 
@@ -397,7 +467,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       // already shows the stage and reason clearly, and a rejection is not
       // an engine crash.
       next.repository = {
-        ...(state.repository ?? { url: '', candidates: [] }),
+        ...(state.repository ?? { url: '', sources: [], patchable: [] }),
         status: 'rejected', rejection: { stage: event.stage, reason: event.reason },
       }
       return next
@@ -436,7 +506,12 @@ function pipelineOf(state: InvestigationState): PipelineStage[] {
   const views = state.order.map((id) => state.hypotheses[id]).filter(Boolean)
   const measured = views.some((view) => view.phases.some((row) => row.p95_ms !== undefined))
   const verdicts = views.filter((view) => view.verdict !== undefined).length
-  const expected = state.candidates.length
+  // On the repository path the suspects come from the detectors; on the
+  // bundled path they come from the localizer. Neither number is computed
+  // here - both are counts of what the backend already emitted.
+  const repositoryRun = state.repository !== undefined
+  const expected = repositoryRun ? state.found.filter((h) => h.testable).length
+                                 : state.candidates.length
 
   const provenance = views.find((view) => view.provenance)?.provenance
   let plannerDetail = 'Awaiting plan'
@@ -455,15 +530,22 @@ function pipelineOf(state: InvestigationState): PipelineStage[] {
     plannerKind = provenance.kind === 'gemini' && !provenance.used_fallback ? 'ai' : 'code'
   }
 
+  const firstStage: PipelineStage = repositoryRun
+    ? { key: 'analysis', label: 'ANALYSIS',
+        detail: state.detectors.length ? state.detectors.join(', ') : 'Deterministic detectors',
+        kind: 'code', status: stage('analysis') }
+    : { key: 'localizer', label: 'LOCALIZER', detail: 'Deterministic', kind: 'code',
+        status: stage('localization') }
+
   return [
-    { key: 'localizer', label: 'LOCALIZER', detail: 'Deterministic', kind: 'code',
-      status: stage('localization') },
+    firstStage,
     { key: 'planner', label: 'PLANNER', detail: plannerDetail, kind: plannerKind,
       status: stage('planning') },
     { key: 'validator', label: 'VALIDATOR', detail: 'Deterministic', kind: 'code',
       status: stage('validation') },
-    { key: 'sandbox', label: 'SANDBOX', detail: 'Controlled execution', kind: 'code',
-      status: stage('experiment') },
+    { key: 'sandbox', label: 'SANDBOX',
+      detail: repositoryRun ? 'Disposable source variants' : 'Controlled execution',
+      kind: 'code', status: stage('experiment') },
     { key: 'measurements', label: 'MEASUREMENTS', detail: 'Deterministic', kind: 'code',
       status: stage('experiment') === 'done' ? 'done' : measured ? 'active' : 'pending' },
     { key: 'verdict', label: 'VERDICT', detail: 'Deterministic', kind: 'code',
@@ -521,16 +603,26 @@ export function useInvestigation() {
     }
   }, [closeStream])
 
-  const start = useCallback(async (repositoryUrl?: string) => {
+  const start = useCallback(async (
+    repositoryUrl?: string, instruction?: string, mode?: string,
+  ) => {
     setStarting(true)
     try {
       const trimmed = repositoryUrl?.trim()
+      // The instruction is sent verbatim. The frontend never parses it, never
+      // rewrites it and never picks a mode on the user's behalf - it sends
+      // what was typed and what was chosen, and causeway.intent reads it.
+      const request: Record<string, string> = {}
+      if (trimmed) request.repository_url = trimmed
+      if (instruction?.trim()) request.instruction = instruction.trim()
+      if (mode) request.mode = mode
+
       const response = await fetch('/api/investigation', {
         method: 'POST',
-        ...(trimmed
+        ...(Object.keys(request).length
           ? {
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ repository_url: trimmed }),
+              body: JSON.stringify(request),
             }
           : {}),
       })

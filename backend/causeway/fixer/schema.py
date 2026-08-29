@@ -66,9 +66,17 @@ class FixRequest:
     mechanism: str                       # why this repair surface causes the incident
     # None for the bundled demo (causeway.sandbox.repair.REPAIR_SURFACES).
     # Set only when this request was built for a repository loaded through
-    # causeway.repository - its own manifest-declared repair surface,
-    # never trusted, always re-validated the same way the bundled one is.
+    # causeway.repository - a surface built from the proven CodeHypothesis
+    # itself, with `current` read live from the cloned file rather than
+    # trusted from anywhere, and re-validated exactly as the bundled one is.
     surfaces: Optional[Mapping[str, Mapping[str, dict]]] = None
+    # Where in the repository the proven hypothesis lives. None on the bundled
+    # path, which has no file and no line - only a symbolic flag. Display and
+    # prompt context; nothing here is a filesystem path a proposal supplied.
+    location: Optional[Mapping[str, Any]] = None
+    # What the user actually asked for, as parsed by causeway.intent. A fix
+    # planner may see the goal and the constraints; it may not widen either.
+    intent: Optional[Mapping[str, Any]] = None
 
 
 @dataclass(frozen=True)

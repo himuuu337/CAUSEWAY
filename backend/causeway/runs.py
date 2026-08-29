@@ -52,6 +52,11 @@ class Run:
     # source with it, without the manager otherwise inspecting what the
     # orchestrator does with it.
     repository_url: str = ""
+    # What the user typed, and the mode they picked in the interface if they
+    # picked one. Carried, never rewritten - causeway.intent parses it on the
+    # repository path, and the manager itself reads neither.
+    instruction: str = ""
+    mode: str = ""
     events: List[dict] = field(default_factory=list)
     # Set once the terminal event has been appended. A reader that is caught up
     # on a closed run has everything there will ever be, and can stop waiting.
@@ -123,12 +128,14 @@ class RunManager:
             return list(self._run.events[index:])
 
     # -- lifecycle ---------------------------------------------------------
-    def start(self, repository_url: str = None) -> Run:
+    def start(self, repository_url: str = None, instruction: str = None,
+              mode: str = None) -> Run:
         with self._lock:
             if self.is_running():
                 raise AlreadyRunning(self._run.id)
             run = Run(id=uuid.uuid4().hex[:12], started_at=time.time(),
-                     repository_url=repository_url or "")
+                     repository_url=repository_url or "",
+                     instruction=instruction or "", mode=mode or "")
             self._run = run
             self._thread = threading.Thread(
                 target=self._drive, args=(run,), daemon=True,
@@ -146,8 +153,16 @@ class RunManager:
         repository counts as one too, since nothing else happens after it."""
         failure = ""
         try:
-            source = (self._source(repository_url=run.repository_url)
-                     if run.repository_url else self._source())
+            # Only ever passed when actually set, so a test double with the
+            # bundled signature stays callable.
+            kwargs = {}
+            if run.repository_url:
+                kwargs["repository_url"] = run.repository_url
+            if run.instruction:
+                kwargs["instruction"] = run.instruction
+            if run.mode:
+                kwargs["mode"] = run.mode
+            source = self._source(**kwargs) if kwargs else self._source()
             for event in source:
                 self._append(run, event)
                 if event.get("type") == "error":

@@ -15,11 +15,12 @@ comment - `backend/tests/test_no_model_in_verdict.py` walks the import graph of
 the module that produces the verdict and fails the build if anything
 model-shaped, networked or planner-shaped becomes reachable from it.
 
-## Status: Milestone 6
+## Status
 
 The causal core, a live investigation streamed to a browser, the dashboard
-that explains it, a verified fix loop, and GitHub repository ingestion for a
-narrowly scoped, contract-following repository.
+that explains it, a verified fix loop, and a repository investigation that
+reads hypotheses out of a real repository's own source and settles them by
+editing that source in disposable copies.
 
 | | |
 |---|---|
@@ -29,6 +30,7 @@ narrowly scoped, contract-following repository.
 | Milestone 4 | Gemini plans the experiments · **done** |
 | Milestone 5 | Gemini plans a fix, verified in a disposable sandbox copy · **done** |
 | Milestone 6 | GitHub repository ingestion, narrowly scoped · **done** |
+| Milestone 7 | the repository path becomes the real path: source-read hypotheses, source-edit experiments, repository-owned database, user intent · **done** |
 
 ## What the dashboard shows, and what it is not allowed to do
 
@@ -95,9 +97,29 @@ The command line still works and needs no dependencies at all:
 |---|---|
 | `GET /api/health` | is the backend up, is this machine seeded, what thresholds is the engine using |
 | `GET /api/status` | what the current investigation is doing |
-| `POST /api/investigation` | start one - optionally `{"repository_url": "https://github.com/..."}`. `202` with a run id, or `409` naming the run already in progress |
+| `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
 | `GET /api/investigation/stream` | Server-Sent Events, resumable |
 | `GET /api/investigation/{id}/events` | the whole buffer as JSON |
+
+`POST /api/investigation` takes an optional JSON body. With no body at all it
+runs the bundled demonstration, exactly as before these fields existed:
+
+    {
+      "repository_url": "https://github.com/owner/repo",
+      "instruction":    "find why the audit endpoint is slow, do not modify anything",
+      "mode":           "diagnose_only"
+    }
+
+`instruction` is carried verbatim to `causeway.intent` and is the only thing
+that reads it — the frontend never parses it and never picks a mode on the
+user's behalf. `mode` is optional; when given it overrides whatever the words
+suggest, because the user chose it. An unknown mode is a `400`, not a
+reinterpretation: guessing at a mode is how a run that was told to change
+nothing ends up changing something.
+
+Seeding is the bundled demonstration's precondition, not the product's — it
+builds Causeway's own template database. A repository brings its own schema
+and seed, so an unseeded machine can still investigate a repository.
 
 One investigation runs at a time, on purpose: the sandbox is a real process
 measuring real latency, and two investigations sharing a machine would measure
@@ -361,104 +383,209 @@ subprocess-shaped is reachable from it - the same structural guarantee
 never pushed, committed, merged, or applied to any file Causeway did not
 create disposably for the run.
 
-## GitHub repository ingestion
+## Repository investigation — the real path
 
-Causeway can investigate a GitHub repository instead of the bundled demo -
-but it does not attempt to support arbitrary repositories, and it says so
-plainly when a repository does not qualify.
+Causeway can investigate a GitHub repository. This is not the bundled A/B
+demonstration pointed at a URL: on this path there is no A and no B, no
+fabricated deploy history, and no correlation ranking. Causeway clones the
+repository, builds a database from **the repository's own schema and seed**,
+**reads the repository's own source** for suspicious locations, and settles
+between them by editing source in disposable copies and measuring.
 
-**Causeway's hackathon prototype supports repositories following the
-Causeway demo contract.** It does not autonomously debug any GitHub
-repository - only ones that declare, at their root, exactly what Causeway is
-allowed to run.
+    GitHub URL + your instruction
+      -> validate -> clone (disposable, isolated workspace)
+      -> causeway.json v2 validated
+      -> database built from the repository's own schema and seed
+      -> hypotheses READ OUT OF THE REPOSITORY'S SOURCE by deterministic detectors
+      -> an experiment per hypothesis, performed as a SOURCE EDIT in a
+         disposable copy
+      -> the same seven-phase protocol, the same verdict engine
+      -> (only if your instruction allows it) a fix, validated, applied to
+         another disposable copy, and verified
 
-    GitHub URL -> validate -> clone (disposable, isolated workspace) ->
-    causeway.json validated -> the same causal investigation and fix loop
-    described above, sourced from the cloned workspace
+The two paths share exactly one thing: `causeway/verdict.py` and
+`causeway/fix_verdict.py`. They share nothing else, and that is checked
+rather than asserted — `backend/tests/test_repo_path_isolation.py` walks
+`causeway.repo_investigation`'s import graph and fails the build if
+`causeway.incident`, `causeway.localizer` or `causeway.observational` ever
+becomes reachable from it, or if anything on that path so much as names
+Causeway's own seeded `TEMPLATE_DB`.
+
+### What this is, stated honestly
+
+**Causeway does not autonomously debug arbitrary repositories, and it does
+not generate arbitrary code from natural language.** Two narrow things are
+true instead, and both are demonstrable:
+
+- **The hypotheses are real, and Causeway finds them itself.** They are not
+  declared in a manifest — a manifest that tries to declare them is rejected
+  by name. They come from `causeway/analysis/detectors.py`, which learns
+  which columns are indexed from the repository's own `schema.sql`, walks
+  the Python AST for SQL string literals, and reports predicates that wrap an
+  indexed column so the index cannot be used. That is **one detector**, for
+  one class of defect. A repository containing no pattern it recognises is
+  told so — never investigated as something else.
+- **The fix is a substitution at one proven location, not generated code.**
+  A fix planner selects a whitelisted repair surface; the bytes written are
+  the repository's own text and the counterfactual the detector derived from
+  the repository's own schema. `operation.type` may only be
+  `replace_predicate`. A model cannot introduce a new string into a file, and
+  cannot name a file at all.
+
+What is genuinely general is the *method*: the seven-phase interleaved
+protocol, the local controls, the abstention rules, and the refusal to let
+anything but a measurement decide. Widening the detector set widens what
+Causeway can investigate without touching any of that.
+
+### Your instruction, and what it controls
+
+Causeway takes an instruction in your own words, and a mode you can state
+explicitly in the interface. The instruction is the goal: it is quoted, never
+rewritten, and never replaced by what a model would have preferred.
+
+| mode | what it permits |
+|---|---|
+| `diagnose_only` | experiments run; **no persistent fix is planned, proposed or applied** |
+| `diagnose_and_fix` | a fix may be proposed for a PROVEN cause, and must verify before it is claimed |
+| `requested_change` | recorded as a change request; this prototype diagnoses and does not implement it |
+| `needs_clarification` | the instruction was ambiguous — Causeway asks, and clones nothing |
+
+A diagnostic intervention is not a fix. An experiment edits a disposable copy
+to establish causality and throws the copy away; a fix is a change you are
+being asked to keep. `diagnose_only` permits the first and forbids the second,
+and it is a gate rather than a label — the fix planner is never asked.
+
+Constraints are split into two kinds, and shown as two different things:
+
+- **Enforced** — checked in deterministic code before anything is written:
+  `only_modify`, `do_not_modify`, `diagnose_only`, `no_new_dependencies`,
+  `no_schema_change`, `max_changed_files`.
+- **Advisory** — recorded and displayed, not mechanically checked ("keep it
+  simple", "preserve backward compatibility"). Claiming to have enforced one
+  of these would be the same class of dishonesty as labelling a fallback
+  "Gemini".
+
+If no instruction is given at all, the run defaults to `diagnose_only` and
+says so — absence of an instruction is not ambiguity, and the safe reading of
+"investigate this repository" is to change nothing.
 
 ### Supported URL format
 
 Exactly `https://github.com/<owner>/<repo>`, with an optional trailing
 `.git`. Rejected: any other scheme (`http://`, `file://`, `javascript:`),
 any host other than `github.com`, credentials embedded in the URL, a port, a
-path outside `<owner>/<repo>`, and path traversal in any form - the
+path outside `<owner>/<repo>`, and path traversal in any form — the
 validator is an allow-list against GitHub's own owner/repo naming rules, not
 a denylist of things to reject.
 
-### The supported repository contract
+### The repository contract: `causeway.json` version 2
 
-A repository qualifies only if it has a `causeway.json` manifest at its
-root:
+A manifest declares **capabilities and safe inputs**. It may not declare the
+answer. Version 1 could — it carried `deploys` and a `repair_surface` — which
+is exactly why version 1 is no longer accepted.
 
     {
-      "version": 1,
+      "version": 2,
       "service": "order-service",
       "runtime": "python",
-      "entrypoint": "service.py",
-      "fixture": "fixtures/incident-001.json",
+      "entrypoint": "app.py",
+      "sources":   ["app.py", "db.py"],
+      "patchable": ["db.py"],
+      "workload": "workload.json",
+      "verification": "latency_p95",
       "incident": { "id": "...", "title": "...", "service": "...",
-                    "symptom": "...", "detected_at": "...",
-                    "window_seconds": 900, "hot_path_files": ["..."] },
-      "deploys": [ { "change_id": "A", "sha": "...", "branch": "...",
-                     "service": "...", "summary": "...", "deployed_at": "...",
-                     "files_changed": 9, "lines_changed": 412,
-                     "changed_files": ["..."] }, "..." ],
-      "repair_surface": { "hypothesis_id": "B", "target": "SCANNING_PREDICATE",
-                          "operation_type": "replace_predicate",
-                          "safe_after": "order_id = ?", "description": "..." }
+                    "symptom": "...", "detected_at": "..." },
+      "database": {
+        "engine": "sqlite",
+        "schema": "schema.sql",
+        "seed": [ { "table": "order_audit", "rows": 40000,
+                    "columns": { "order_id": {"kind": "cycle", "modulo": 5000} } } ]
+      }
     }
 
-`entrypoint` and `fixture` are resolved and checked to stay inside the
-cloned workspace - a path that escapes it, by any spelling, is rejected, not
-sanitised. `runtime` is checked against a whitelist (`python` only, for now).
-A manifest that is missing, malformed, the wrong version, or missing any
-required field is rejected outright:
+A manifest carrying any of `repair_surface`, `root_cause`, `deploys`,
+`answer`, `correct_hypothesis`, `known_cause`, `verdict` or `fix` is
+**rejected by name**, before anything else is checked:
 
-    UNSUPPORTED REPOSITORY
-    "This repository does not contain a supported Causeway demo configuration."
+    a manifest describes capabilities, not conclusions - remove deploys,
+    repair_surface. Causeway finds hypotheses by reading the source and
+    settles them by measuring.
 
-A rejected repository **never reaches a subprocess**. Causeway does not
-install a dependency on the repository's behalf, does not run a
-repository-provided setup script or hook, and does not guess how to execute
-an unsupported layout.
+There are no command strings anywhere in this vocabulary. Causeway runs
+`python <entrypoint>` and nothing else. The schema may only create and drop
+tables, indexes and views — `ATTACH`, `PRAGMA`, `load_extension`, `INSERT`
+and `DELETE` are all refused, before a database file exists. Seed columns
+come from a closed set of kinds (`rowid`, `cycle`, `choice`, `text`, `const`,
+`int_range`) with a hard row cap. Every path in the manifest is resolved and
+re-checked to be inside the cloned workspace; one that escapes it, by any
+spelling, is rejected rather than sanitised.
 
-### What actually runs
+### How an experiment is performed
 
-The cloned entrypoint is launched as a subprocess - `python <entrypoint>` -
-exactly the way the bundled demo's own `causeway/sandbox/service.py` is
-launched. It is never `import`ed into the Causeway process. The clone itself
-uses `git clone --depth 1` with an argument-array subprocess call (never
-`shell=True`), repository-provided hooks disabled, credential prompts
-disabled outright, and a bounded timeout. The workspace is a fresh temporary
-directory, removed once the investigation ends - the developer's own
-Causeway checkout is never written to, and neither is the repository being
-investigated.
+A hypothesis on this path is a place in real source, so the intervention is
+an edit to real source:
 
-**Causeway never silently substitutes the bundled demo.** A repository URL
-either produces a real investigation of that repository, sourced from its
-own fixture and its own entrypoint, or a visible rejection - never a quiet
-fallback to `fixtures/incident-001.json`.
+    healthy       every testable location replaced by its counterfactual
+    incident      the repository exactly as cloned, nothing applied
+    ablated:<id>  as cloned, with exactly ONE location's counterfactual
+
+Each phase copies the cloned workspace, applies its edits to the **copy**,
+launches `python <entrypoint>` against the copy, measures, and deletes the
+copy — whether the phase succeeded or raised. Every edit path is resolved and
+re-checked **after** `realpath`, so a symlink cannot walk out of the
+workspace, and each edit's target text must occur exactly once in the file:
+an ambiguous match means the caller does not know which occurrence it is
+changing, and a causal experiment cannot be built on that.
+
+Measured cost of that actuator on the reference machine: about **0.35 s per
+phase** — copy, start, health-check and cleanup — against a seven-phase
+experiment. The clone is never written to. Causeway's own checkout is never
+written to. The repository on GitHub is never pushed to, committed to or
+merged into.
+
+**Causeway never silently substitutes the bundled demonstration.** A
+repository URL either produces a real investigation of that repository —
+its own database, its own source, its own workload — or a visible rejection.
 
 ### Current limitations
 
-- **Public repositories only.** No OAuth, no personal access token, no
-  GitHub App - a private repository fails cleanly (no credential prompt,
-  just a clean rejection) rather than being supported.
-- **One supported runtime** (`python`, standard library only) and one
-  supported repair operation type (`replace_predicate`) for this milestone.
-- **Sandbox-only fix verification.** Exactly as the bundled demo's fix loop:
-  a verified fix is shown for human review. Nothing is pushed, committed,
-  merged, or deployed - to the repository investigated or anywhere else.
-- **One investigation at a time**, same as the bundled demo - the sandbox is
-  real process measuring real latency.
+- **One detector**: `sql_predicate_index_usability`. Wrapped indexed columns
+  in SQL predicates. Nothing else is detected, and nothing else is claimed.
+- **One runtime** (`python`, standard library only), **one storage engine**
+  (`sqlite`), **one verification metric** (`latency_p95`), and **one repair
+  operation type** (`replace_predicate`).
+- **Public repositories only.** No OAuth, no personal access token, no GitHub
+  App — a private repository fails cleanly rather than prompting for
+  credentials.
+- **At least two testable hypotheses are required.** An experiment that
+  cannot discriminate between anything is not run.
+- **Sandbox-only fix verification.** A verified fix is shown for human
+  review. Nothing is pushed, committed, merged or deployed — to the
+  repository investigated or anywhere else.
+- **`requested_change` is recognised, not implemented.** Causeway records the
+  request and diagnoses; it does not write the feature.
+- **One investigation at a time** — the sandbox is a real process measuring
+  real latency, and two runs sharing a machine would measure each other.
 
 ### The demo repository
 
-`demo-repo/` in this checkout is a complete, working example of the
-contract - the same controlled order-service incident the bundled demo
-ships, with its own `causeway.json`, checked in as a real repository so it
-can be pushed to GitHub and pointed at directly. See `demo-repo/README.md`
-for how to publish it.
+`demo-repo/` in this checkout is a complete, working example of the contract:
+a small order-service with its own schema, its own 40,000-row seed, its own
+workload, and **two statically identical suspects**. Both wrap an indexed
+column in a predicate. One is on a 40,000-row audit table and is the
+incident; the other is on a six-row lookup table and costs nothing. No
+detector can tell them apart, because statically they are the same. The
+experiment settles it — and that is the whole product in one screen.
+
+## The bundled demonstration
+
+Running with no repository URL runs the bundled A/B demonstration: two
+fabricated deploy records, a deterministic localizer, a correlation-only
+ranking that picks the decoy, and runtime flags standing in for a
+deployment. It is a demonstration of the method on a system built to
+demonstrate it, and both the interface and this README say so. It exists
+because it is fast, deterministic and shows the correlation-versus-
+intervention contrast in one screen — not because it is the product.
 
 ## Sizing, not hardcoding
 
@@ -473,11 +600,20 @@ diagnostics; every experiment measures its own controls while it runs.
 
 ## Scope boundary
 
-The intervention is real: exactly one variable moves, every other flag is held
-fixed, the workload is byte-identical between phases, and the database is
-restored between them. What is simulated is the *deployment mechanism* - a
-candidate change is a runtime flag rather than a rebuild from a reverted
-commit. Worth saying out loud rather than letting someone find it.
+On **both** paths the intervention is real: exactly one variable moves, every
+other one is held fixed, the workload is byte-identical between phases, and
+the database is restored between them.
+
+What differs is what a variable *is*.
+
+- **Repository path**: a variable is a location in that repository's own
+  source, and moving it means writing different bytes into a disposable copy
+  and launching it. Nothing about the deployment mechanism is simulated —
+  what is narrow is the *class of defect* Causeway can currently detect.
+- **Bundled demonstration**: a variable is a runtime flag rather than a
+  rebuild from a reverted commit. The deployment mechanism is simulated
+  there, and that is worth saying out loud rather than letting someone find
+  it.
 
 ## Layout
 
@@ -486,9 +622,17 @@ commit. Worth saying out loud rather than letting someone find it.
         verdict.py          THE CAUSAL VERDICT - no model may be reachable from here
         fix_verdict.py      THE FIX VERDICT - same structural guarantee, five phases
         measurement.py      p50/p95, and the median across repetitions
-        incident.py         the bundled demo's incident and deploy record (data)
-        localizer.py        deterministic candidate filtering
-        observational.py    the correlation-only baseline - structurally blind
+        repo_investigation.py  THE REPOSITORY PATH - cannot reach the three below
+        phasing.py          shared phase-to-event rendering (verdict's words only)
+        incident.py         the bundled demonstration's incident record (data)
+        localizer.py        deterministic candidate filtering (bundled only)
+        observational.py    the correlation-only baseline (bundled only)
+        analysis/
+          hypothesis.py     CodeHypothesis - a file, a line, a counterfactual
+          detectors.py      hypotheses read out of real source; no manifest input
+        intent/
+          schema.py         IntentSpec, enforceable vs advisory constraints
+          deterministic.py  the offline instruction reader
         planner/
           schema.py         ExperimentSpec and the JSON schema
           validator.py      the eight deterministic checks
@@ -503,18 +647,22 @@ commit. Worth saying out loud rather than letting someone find it.
         repository/
           urlcheck.py       GitHub URL validation - an allow-list, not a denylist
           git.py            safe, argument-array clone into a disposable workspace
-          manifest.py       causeway.json - the supported repository contract
+          manifest.py       causeway.json v2 - capabilities only, never answers
+          database.py       the repository's OWN database, from a declarative
+                            contract; no command strings anywhere in it
         sandbox/
           seed.py           deterministic database builder + calibration
           service.py        the bundled demo order-service (its own process)
           replay.py         deterministic fixture replay
           runner.py         lifecycle: restore, set flags, replay, repeat
-          repair.py         the bundled demo's whitelisted repair surface
+          repair.py         whitelisted repair surfaces (bundled + repository)
           fixapply.py       patches a disposable copy - never the checked-in source
+          variant.py        disposable SOURCE VARIANTS - the repository actuator
+          actuator.py       how a phase's state is put into effect: flags, or edits
         orchestrator.py     the investigation, as a stream of events
         api.py               the HTTP surface
         cli.py               the command-line entry point
       tests/
       fixtures/             the bundled demo's recorded traffic (portable, in git)
       .data/                this machine's database and calibration (not in git)
-    demo-repo/              a real, working example of the repository contract
+    demo-repo/              a real repository with two identical-looking suspects

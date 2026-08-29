@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from causeway import verdict
 from causeway.planner.deterministic import DeterministicPlanner
 from causeway.planner.gemini import GeminiPlanner
-from causeway.planner.schema import (ExperimentPlan, PlanRequest,
+from causeway.planner.schema import (CODE_EVIDENCE, DEPLOY_EVIDENCE,
+                                     ExperimentPlan, PlanRequest,
                                      PLAN_SCHEMA, ProviderUnavailable)
 from causeway.planner.validator import ValidationReport, validate
 
@@ -73,6 +74,44 @@ def build_request(incident, candidates, incident_state, fixtures, target,
         failure_factor=verdict.FAILURE_FACTOR,
         recovery_factor=verdict.RECOVERY_FACTOR,
         target_hypothesis=target,
+    )
+
+
+def build_request_for_code(incident, hypotheses, state, workloads, target):
+    """Assemble everything a planner may see about a REPOSITORY investigation.
+
+    The candidates here are places in the repository's own source, found by
+    causeway.analysis.detectors - not deploy records, and not A and B. Each
+    one carries what the detector actually saw and the counterfactual it
+    derived, because that is the evidence a planner is reasoning from.
+
+    Note what is still absent, and absent for the same reason it is absent
+    from build_request: PlanRequest has no field that could carry a
+    measurement, and none of these fields is one. A test asserts that the
+    rendered prompt contains no result, ratio or verdict.
+    """
+    return PlanRequest(
+        incident=dict(incident),
+        candidates=tuple({
+            "id": h.id,
+            "label": h.label,
+            "file": h.file,
+            "line": h.line,
+            "symbol": h.symbol,
+            "kind": h.kind,
+            "observed": h.observed,
+            "counterfactual": h.counterfactual,
+            "evidence": h.evidence,
+            "reason": h.reason,
+            "detector": h.detector,
+        } for h in hypotheses),
+        intervention_surfaces=tuple(sorted(state)),
+        incident_state=dict(state),
+        fixtures=tuple(workloads),
+        failure_factor=verdict.FAILURE_FACTOR,
+        recovery_factor=verdict.RECOVERY_FACTOR,
+        target_hypothesis=target,
+        evidence_kind=CODE_EVIDENCE,
     )
 
 

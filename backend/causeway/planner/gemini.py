@@ -97,6 +97,73 @@ def timeout_from_env() -> float:
         return DEFAULT_TIMEOUT
 
 
+def _deploy_evidence(request: PlanRequest) -> list:
+    """The bundled demo's candidates: changes deployed in the incident window."""
+    lines = ["CANDIDATE CHANGES, all deployed inside the incident window:"]
+    for candidate in request.candidates:
+        line = ("  %s  %s  -  %s  (%d lines across %d files"
+                % (candidate.get("change_id"), candidate.get("branch"),
+                   candidate.get("summary"), candidate.get("lines_changed", 0),
+                   candidate.get("files_changed", 0)))
+        score = candidate.get("observational_score")
+        if score is not None:
+            line += ", correlation-only score %.3f" % score
+        lines.append(line + ")")
+    lines += [
+        "",
+        "The correlation-only score is an observational ranking: evidence about "
+        "how suspicious a change looks, not about whether it is causal, and not "
+        "a result.",
+        "",
+        "AVAILABLE INTERVENTIONS (runtime flags the sandbox can toggle): %s"
+        % ", ".join(request.intervention_surfaces),
+        "FLAG STATE AT INCIDENT TIME: %s"
+        % json.dumps(request.incident_state, sort_keys=True),
+    ]
+    return lines
+
+
+def _code_evidence(request: PlanRequest) -> list:
+    """A repository's candidates: locations a detector found in its own source.
+
+    There is no branch, no diff and no deploy history here, because none was
+    invented. What a candidate carries is the text actually present in the
+    file, the counterfactual a detector derived for it, and why that is worth
+    testing - and nothing that says which of them is the cause.
+    """
+    lines = ["SUSPECT CODE LOCATIONS, found by static analysis of this "
+             "repository's own source:"]
+    for candidate in request.candidates:
+        lines += [
+            "  %s" % candidate.get("id"),
+            "      at        %s:%s in %s()" % (candidate.get("file"),
+                                               candidate.get("line"),
+                                               candidate.get("symbol")),
+            "      found by  %s" % candidate.get("detector"),
+            "      present   %s" % json.dumps(candidate.get("observed", "")),
+            "      would be  %s  (the counterfactual, if this location were "
+            "removed)" % json.dumps(candidate.get("counterfactual", "")),
+            "      why       %s" % candidate.get("reason"),
+        ]
+    lines += [
+        "",
+        "These locations are statically indistinguishable from one another. A "
+        "detector can say a pattern is present; it cannot say what it costs at "
+        "run time. That is what the experiment is for.",
+        "",
+        "AVAILABLE INTERVENTIONS: each location above can be REMOVED - a "
+        "disposable copy of the repository is made, that one location is "
+        "rewritten to its counterfactual, and the copy is launched and "
+        "measured. The original repository is never modified. The identifiers "
+        "you may intervene on are: %s" % ", ".join(request.intervention_surfaces),
+        "STATE AS THE REPOSITORY WAS CLONED: %s"
+        % json.dumps(request.incident_state, sort_keys=True),
+        "  (true means the location is present in the source exactly as cloned; "
+        "setting one to false is what asks for it to be removed)",
+    ]
+    return lines
+
+
 def build_prompt(request: PlanRequest) -> str:
     """Everything the planner is allowed to know.
 
@@ -111,29 +178,14 @@ def build_prompt(request: PlanRequest) -> str:
         "Symptom: %s" % incident.get("symptom"),
         "Detected at %s." % incident.get("detected_at"),
         "",
-        "CANDIDATE CHANGES, all deployed inside the incident window:",
     ]
-    for candidate in request.candidates:
-        line = ("  %s  %s  -  %s  (%d lines across %d files"
-                % (candidate.get("change_id"), candidate.get("branch"),
-                   candidate.get("summary"), candidate.get("lines_changed", 0),
-                   candidate.get("files_changed", 0)))
-        score = candidate.get("observational_score")
-        if score is not None:
-            line += ", correlation-only score %.3f" % score
-        lines.append(line + ")")
+    lines += (_code_evidence(request) if request.is_code
+              else _deploy_evidence(request))
 
     lines += [
-        "",
-        "The correlation-only score is an observational ranking: evidence about "
-        "how suspicious a change looks, not about whether it is causal, and not "
-        "a result.",
-        "",
-        "AVAILABLE INTERVENTIONS (runtime flags the sandbox can toggle): %s"
-        % ", ".join(request.intervention_surfaces),
-        "FLAG STATE AT INCIDENT TIME: %s"
-        % json.dumps(request.incident_state, sort_keys=True),
-        "REPLAY FIXTURES AVAILABLE: %s" % ", ".join(request.fixtures),
+        "REPLAY %s AVAILABLE: %s"
+        % ("WORKLOADS" if request.is_code else "FIXTURES",
+           ", ".join(request.fixtures)),
         "METRIC OBSERVED: p95_ms, the 95th percentile request latency over a "
         "replayed workload.",
         "",
@@ -150,10 +202,13 @@ def build_prompt(request: PlanRequest) -> str:
         "Rules your plan must satisfy, or it will be rejected:",
         "  - hypothesis_id must be %s" % request.target_hypothesis,
         "  - intervention.flag must be %s and intervention.value must be false, "
-        "so the change is removed" % request.target_hypothesis,
-        "  - exactly one flag may move; every other flag is held fixed",
+        "so the %s is removed"
+        % (request.target_hypothesis,
+           "code location" if request.is_code else "change"),
+        "  - exactly one may move; every other one is held fixed",
         "  - fixture_id must be one of the fixtures listed above",
-        "  - discriminates_between must name at least two candidates",
+        "  - discriminates_between must name at least two candidates, by the "
+        "identifiers listed above",
         "  - expected_signature describes what you expect IF the hypothesis is "
         "true: metric \"p95_ms\", op \"<=\", relative_to \"control\", and factor "
         "exactly %s" % request.recovery_factor,

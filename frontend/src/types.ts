@@ -75,12 +75,82 @@ export interface Validation {
   reasoning_flagged: boolean
 }
 
-/** One candidate as a repository's own causeway.json manifest declared it -
- * never fabricated history, only what the repository itself said. */
-export interface RepositoryCandidateSummary {
-  change_id: string
-  branch: string
-  summary: string
+/**
+ * One suspicious location a deterministic detector found in a repository's
+ * own source. This is what replaces A and B on the repository path: not a
+ * label on a fabricated deploy, but a file, a line, the exact text found
+ * there and the counterfactual that would be written to test it.
+ */
+export interface CodeHypothesis {
+  id: string
+  label: string
+  file: string
+  line: number
+  symbol: string
+  kind: string
+  observed: string
+  counterfactual: string | null
+  evidence: string
+  reason: string
+  detector: string
+  testable: boolean
+  context: string[]
+}
+
+/** What the user asked for, parsed into something enforceable. */
+export type IntentMode =
+  | 'diagnose_only' | 'diagnose_and_fix' | 'requested_change' | 'needs_clarification'
+
+export interface Constraint {
+  kind: string
+  value: unknown
+  source: string
+  enforceable: boolean
+}
+
+export interface IntentSpec {
+  raw_instruction: string
+  mode: IntentMode
+  goal: string
+  question: string
+  source: string
+  allows_fix: boolean
+  no_fix_reason: string
+  constraints: Constraint[]
+  enforced: Constraint[]
+  advisory: Constraint[]
+  allowed_scope: string[]
+  prohibited_scope: string[]
+}
+
+/** How a phase's state was put into effect. `runtime_flags` is the bundled
+ * demo; `source_variant` is a repository, where the edits below were applied
+ * to a disposable copy. */
+export interface Intervention {
+  kind: 'runtime_flags' | 'source_variant' | string
+  flags?: Record<string, boolean>
+  edits?: { file: string; from: string; to: string; hypothesis: string }[]
+  unmodified?: boolean
+}
+
+export interface AppliedEdit {
+  file: string
+  before: string
+  after: string
+  label: string
+  line: number
+}
+
+export interface DatabaseSummary {
+  engine: string
+  tables: Record<string, number>
+  bytes: number
+}
+
+export interface WorkloadSummary {
+  id: string
+  requests: number
+  concurrency: number
 }
 
 /** A proposed fix, only ever requested for a hypothesis already PROVEN. */
@@ -103,17 +173,45 @@ export type CausewayEvent =
   | {
       type: 'incident'
       incident: Record<string, unknown> & { id: string; service: string; title: string; symptom: string; detected_at: string }
-      calibration: { healthy_p95_ms: number; incident_p95_ms: number; ratio: number; audit_rows: number }
-      fixture: { id: string; requests: number; concurrency: number; recorded_from: string }
+      // the bundled demo carries a calibration and a recorded fixture;
+      // a repository carries its own workload and its own database
+      calibration?: { healthy_p95_ms: number; incident_p95_ms: number; ratio: number; audit_rows: number }
+      fixture?: { id: string; requests: number; concurrency: number; recorded_from: string }
+      workload?: WorkloadSummary
+      database?: DatabaseSummary
+      verification?: string
       repetitions: number
+    }
+  | { type: 'intent' } & IntentSpec
+  | { type: 'needs_clarification'; question: string; raw_instruction: string; modes: string[] }
+  | {
+      type: 'hypotheses'
+      hypotheses: CodeHypothesis[]
+      testable: string[]
+      sources: string[]
+      detectors: string[]
     }
   | { type: 'candidates'; candidates: Candidate[]; excluded: Exclusion[]; deploys_considered: number }
   | { type: 'observational'; assessments: Assessment[]; top_suspect: string; weights: Record<string, number>; margin: number }
   | ({ type: 'plan'; hypothesis: string; plan: Plan; validation: Validation; provenance: Provenance })
   | ({ type: 'validation'; hypothesis: string } & Validation)
-  | { type: 'experiment_start'; hypothesis: string; phases: string[]; intervention: { flag: string; value: boolean }; holding_fixed: string[] }
-  | { type: 'phase_start'; hypothesis: string; phase: string; flags: Record<string, boolean> }
-  | { type: 'phase_result'; hypothesis: string; phase: string; role: 'control' | 'evidence'; p95_ms: number; p50_ms: number; reps: number; error_rate: number }
+  | {
+      type: 'experiment_start'
+      hypothesis: string
+      phases: string[]
+      holding_fixed: string[]
+      // bundled demo
+      intervention?: { flag: string; value: boolean }
+      // repository: the location under test
+      label?: string
+      file?: string
+      line?: number
+      symbol?: string
+      observed?: string
+      counterfactual?: string | null
+    }
+  | { type: 'phase_start'; hypothesis: string; phase: string; flags?: Record<string, boolean>; intervention?: Intervention }
+  | { type: 'phase_result'; hypothesis: string; phase: string; role: 'control' | 'evidence'; p95_ms: number; p50_ms: number; reps: number; error_rate: number; applied?: AppliedEdit[] }
   | {
       type: 'phase_judged'
       hypothesis: string
@@ -128,20 +226,26 @@ export type CausewayEvent =
   | { type: 'verdict'; hypothesis: string; verdict: Verdict; reason: string; detail: Record<string, unknown>; phases: unknown[] }
   | {
       type: 'conclusion'
-      observational_top_suspect: string
       verdicts: Record<string, Verdict>
       proven: string[]
       refuted: string[]
-      correlation_selected_decoy: boolean
       elapsed_s: number
+      // bundled demo only: there is no correlation baseline on the
+      // repository path, because there is no deploy history to correlate
+      observational_top_suspect?: string
+      correlation_selected_decoy?: boolean
+      // repository only
+      proven_labels?: string[]
     }
-  | { type: 'root_cause_proven'; hypothesis: string; verdict: Verdict }
+  | { type: 'root_cause_proven'; hypothesis: string; verdict: Verdict; label?: string }
+  | { type: 'fix_skipped'; reason: string; mode: IntentMode }
+  | { type: 'fix_blocked'; hypothesis: string; file: string; scope: 'intent' | 'repository'; reason: string }
   | ({ type: 'fix_plan'; hypothesis: string; fix: Fix; validation: Validation; provenance: Provenance })
   | ({ type: 'fix_validation'; hypothesis: string } & Validation)
-  | { type: 'fix_apply'; hypothesis: string; summary: string; operation: FixOperation }
-  | { type: 'fix_experiment_start'; hypothesis: string; phases: string[]; operation: FixOperation }
-  | { type: 'fix_phase_start'; hypothesis: string; phase: string; flags: Record<string, boolean> }
-  | { type: 'fix_phase_result'; hypothesis: string; phase: string; role: 'control' | 'evidence'; p95_ms: number; p50_ms: number; reps: number; error_rate: number }
+  | { type: 'fix_apply'; hypothesis: string; summary: string; operation: FixOperation; file?: string; label?: string; diff?: string; applied_to?: string }
+  | { type: 'fix_experiment_start'; hypothesis: string; phases: string[]; operation?: FixOperation }
+  | { type: 'fix_phase_start'; hypothesis: string; phase: string; flags?: Record<string, boolean>; patched?: boolean; intervention?: Intervention }
+  | { type: 'fix_phase_result'; hypothesis: string; phase: string; role: 'control' | 'evidence'; p95_ms: number; p50_ms: number; reps: number; error_rate: number; patched?: boolean; applied?: AppliedEdit[] }
   | {
       type: 'fix_phase_judged'
       hypothesis: string
@@ -164,7 +268,12 @@ export type CausewayEvent =
       commit_sha: string
       service: string
       runtime: string
-      candidates: RepositoryCandidateSummary[]
+      verification: string
+      entrypoint: string
+      sources: string[]
+      patchable: string[]
+      database: DatabaseSummary
+      workload: WorkloadSummary
     }
   | { type: 'repository_rejected'; stage: string; reason: string }
   | { type: 'done'; elapsed_s: number }

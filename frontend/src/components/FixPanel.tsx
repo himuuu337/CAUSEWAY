@@ -53,6 +53,7 @@ function plannerClass(view: FixView): string {
  * only as a proportion of the larger of the two measurements shown.
  */
 export default function FixPanel({ view, candidate }: Props) {
+  const title = view.label ?? view.hypothesis
   const rows = EVIDENCE.map((phase) => rowOf(view, phase))
   const values = rows
     .map((row) => row?.p95_ms)
@@ -62,22 +63,41 @@ export default function FixPanel({ view, candidate }: Props) {
   return (
     <section className="card fix-card">
       <div className="card-head">
-        <h2 className="card-title">Verified fix — {view.hypothesis}</h2>
+        <h2 className="card-title">Verified fix — <span className="mono">{title}</span></h2>
         <span className="card-note">
-          root cause proven → Gemini proposes a fix → code validates → sandbox tests it
+          root cause proven → a fix is proposed → code validates → sandbox tests it
         </span>
         <div className="spacer" />
-        {view.verdict
-          ? <span className={`verdict-pill fix-${view.verdict}`}>{FIX_VERDICT_WORD[view.verdict]}</span>
-          : <span className="verdict-pill waiting">
-              {view.started ? 'MEASURING…' : 'PLANNING…'}
-            </span>}
+        {view.blocked
+          ? <span className="verdict-pill waiting">NO FIX PROPOSED</span>
+          : view.verdict
+            ? <span className={`verdict-pill fix-${view.verdict}`}>{FIX_VERDICT_WORD[view.verdict]}</span>
+            : <span className="verdict-pill waiting">
+                {view.started ? 'MEASURING…' : 'PLANNING…'}
+              </span>}
       </div>
+
+      {view.blocked && (
+        <div className="notice repo-rejected">
+          <div className="repo-rejected-title">
+            {view.blocked.scope === 'intent'
+              ? 'BLOCKED BY YOUR INSTRUCTION'
+              : 'BLOCKED BY THE REPOSITORY&apos;S OWN MANIFEST'}
+          </div>
+          <div>{view.blocked.reason}</div>
+          <div className="small faint" style={{ marginTop: 6 }}>
+            The cause above is still proven — it was established by measurement.
+            What was refused is changing a file this run is not permitted to change.
+          </div>
+        </div>
+      )}
 
       <div className="fix-chain">
         <div className="fix-chain-step">
           <div className="k">VERIFIED ROOT CAUSE</div>
-          <div className="v">{view.hypothesis} — {candidate?.branch ?? ''}</div>
+          <div className="v mono">
+            {title}{candidate?.branch ? ` — ${candidate.branch}` : ''}
+          </div>
         </div>
         <div className="fix-chain-link" aria-hidden="true">&darr;</div>
         <div className="fix-chain-step">
@@ -99,6 +119,29 @@ export default function FixPanel({ view, candidate }: Props) {
             <div className="patch-line after">+ {view.fix.operation.after}</div>
           </div>
         </div>
+      )}
+
+      {view.diff && (
+        <details className="patch-diff" open>
+          <summary>
+            The patch, as it was applied to a disposable copy
+            {view.file ? ` of ${view.file}` : ''}
+          </summary>
+          <pre className="diff">
+            {view.diff.split('\n').map((line, index) => (
+              <div
+                key={index}
+                className={
+                  line.startsWith('+') && !line.startsWith('+++') ? 'diff-add'
+                    : line.startsWith('-') && !line.startsWith('---') ? 'diff-del'
+                      : line.startsWith('@@') ? 'diff-hunk' : 'diff-ctx'
+                }
+              >
+                {line}
+              </div>
+            ))}
+          </pre>
+        </details>
       )}
 
       {view.fix?.reasoning_summary && (
@@ -126,6 +169,11 @@ export default function FixPanel({ view, candidate }: Props) {
                   {index > 0 && <div className="stage-sep" aria-hidden="true">&rarr;</div>}
                   <div className={`stage ${state}`}>
                     <div className="stage-name">{STAGE_WORD[phase]}</div>
+                    {row?.patched !== undefined && (
+                      <div className="small faint">
+                        {row.patched ? 'patched build' : 'unpatched build'}
+                      </div>
+                    )}
                     <div className={`stage-value${row?.p95_ms === undefined ? ' pending' : ''}`}>
                       {row?.p95_ms !== undefined
                         ? ms(row.p95_ms)

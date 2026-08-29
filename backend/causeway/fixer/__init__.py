@@ -9,6 +9,9 @@ and causeway.sandbox.repair; neither of those imports back.
 """
 from __future__ import annotations
 
+import difflib
+import io
+import os
 from dataclasses import dataclass
 from typing import Mapping, Optional
 
@@ -19,6 +22,17 @@ from causeway.fixer.schema import (FIX_SCHEMA, FixOperation, FixRequest,
                                    FixSpec, ProviderUnavailable)
 from causeway.fixer.validator import FixValidationReport, validate
 from causeway.sandbox import repair
+from causeway.sandbox.variant import SourceEdit
+
+# The one operation a repository fix is representable as, and the only one
+# causeway.fixer.schema.ALLOWED_OPERATION_TYPES admits. Widening this is
+# future work, not something a proposal can talk its way into.
+CODE_OPERATION = "replace_predicate"
+
+
+class FixSurfaceUnavailable(RuntimeError):
+    """The proven hypothesis no longer describes what is in the file, so
+    there is nothing safe to offer a fix planner. Nothing is patched."""
 
 
 @dataclass(frozen=True)
@@ -79,6 +93,129 @@ def build_fix_request(candidate: dict, hypothesis_id: str, causal_verdict: str,
         mechanism="; ".join(mechanisms),
         surfaces=surfaces,
     )
+
+
+# --------------------------------------------------------------- repository
+
+def code_target(hypothesis) -> str:
+    """The symbolic name a repository fix's repair surface is addressed by.
+
+    A bare identifier, assembled from the hypothesis's own symbol and kind -
+    never a path, and never anything a proposal supplied. The fix validator
+    rejects a target containing a separator, and this cannot produce one.
+    """
+    return "%s_%s" % (hypothesis.symbol, hypothesis.kind)
+
+
+def _current_from_workspace(workspace: str, hypothesis) -> str:
+    """Read the broken text back out of the cloned file, right now.
+
+    The hypothesis was derived from this file when the repository was loaded;
+    this proves it still says the same thing, and that it says it exactly
+    once, before anything is offered to a planner as the value to replace.
+    """
+    path = os.path.join(workspace, hypothesis.file)
+    with io.open(path, encoding="utf-8") as handle:
+        source = handle.read()
+    occurrences = source.count(hypothesis.observed)
+    if occurrences != 1:
+        raise FixSurfaceUnavailable(
+            "%s appears %d times in %s - a repair surface must be unambiguous"
+            % (hypothesis.observed, occurrences, hypothesis.file))
+    return hypothesis.observed
+
+
+def code_surfaces(hypothesis, workspace: str) -> dict:
+    """The repair surface for one proven CodeHypothesis, in the shape
+    causeway.sandbox.repair already validates against.
+
+    `current` is read live from the clone. `safe_after` is the counterfactual
+    the detector derived from the repository's own schema - which is why the
+    fix prompt must never quote it: it is the answer the validator exists to
+    check a proposal against.
+    """
+    if not hypothesis.testable:
+        raise FixSurfaceUnavailable(
+            "%s has no counterfactual, so there is nothing to repair"
+            % hypothesis.label)
+    return {
+        hypothesis.id: {
+            code_target(hypothesis): {
+                "operation_type": CODE_OPERATION,
+                "current": (lambda value=_current_from_workspace(workspace, hypothesis): value),
+                "safe_after": hypothesis.counterfactual,
+                "description": hypothesis.reason,
+            },
+        },
+    }
+
+
+def build_code_fix_request(hypothesis, causal_verdict: str, causal_reason: str,
+                           workspace: str, intent=None) -> FixRequest:
+    """Assemble everything a fix planner may see about a REPOSITORY repair.
+
+    Only ever called for a hypothesis causeway.verdict has already decided is
+    PROVEN. The caller is responsible for having checked the intent's own
+    constraints first - this function builds a request, it does not grant
+    permission.
+    """
+    surfaces = code_surfaces(hypothesis, workspace)
+    target = code_target(hypothesis)
+    return FixRequest(
+        hypothesis_id=hypothesis.id,
+        candidate={"label": hypothesis.label, "detector": hypothesis.detector,
+                   "kind": hypothesis.kind},
+        causal_verdict=causal_verdict,
+        causal_reason=causal_reason,
+        repair_targets=(target,),
+        current_code={target: repair.current_value(hypothesis.id, target,
+                                                   surfaces=surfaces)},
+        mechanism=hypothesis.reason,
+        surfaces=surfaces,
+        location={"file": hypothesis.file, "line": hypothesis.line,
+                  "symbol": hypothesis.symbol, "observed": hypothesis.observed},
+        intent=intent.as_dict() if intent is not None else None,
+    )
+
+
+def edit_for(operation, hypothesis) -> SourceEdit:
+    """The source edit a validated FixOperation authorises.
+
+    The operation SELECTS a repair surface; this supplies the bytes. The text
+    written is the repository's own - hypothesis.observed replaced by the
+    counterfactual the detector derived - never the strings that came back
+    from a planner, which the validator has only proven equal ignoring
+    whitespace. Equal-ignoring-whitespace is the right test for "did you
+    understand the surface"; it is the wrong text to write into a file, where
+    an exact single match is what makes the edit unambiguous.
+    """
+    if operation.target != code_target(hypothesis):
+        raise FixSurfaceUnavailable(
+            "%r is not the repair surface for %s" % (operation.target, hypothesis.label))
+    if operation.type != CODE_OPERATION:
+        raise FixSurfaceUnavailable("unsupported operation %r" % operation.type)
+    return SourceEdit(file=hypothesis.file, before=hypothesis.observed,
+                      after=hypothesis.counterfactual,
+                      label="fix:%s" % hypothesis.id)
+
+
+def unified_diff(workspace: str, hypothesis, edit: SourceEdit) -> str:
+    """The patch, as a human would review it - computed from the real file.
+
+    Nothing here writes anything. The variant machinery applies the same edit
+    to a disposable copy when the fix is measured; this only renders it.
+    """
+    path = os.path.join(workspace, edit.file)
+    with io.open(path, encoding="utf-8") as handle:
+        original = handle.read()
+    if original.count(edit.before) != 1:
+        raise FixSurfaceUnavailable(
+            "cannot render a diff for %s - the text to replace is not unique"
+            % edit.file)
+    patched = original.replace(edit.before, edit.after, 1)
+    return "".join(difflib.unified_diff(
+        original.splitlines(keepends=True), patched.splitlines(keepends=True),
+        fromfile="a/%s" % edit.file, tofile="b/%s" % edit.file, n=3))
 
 
 def plan_fix(request: FixRequest, provider) -> FixOutcome:

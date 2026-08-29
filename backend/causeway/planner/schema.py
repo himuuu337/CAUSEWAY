@@ -18,6 +18,14 @@ ALLOWED_OPS = ("<", "<=")
 # millisecond figure, which goes stale the moment the machine changes.
 ALLOWED_REFERENCES = ("control",)
 
+# What kind of evidence the candidates in a PlanRequest are. The bundled demo
+# hands a planner deploy records; a repository hands it locations in its own
+# source. The validator does not care which - it checks identifiers, not
+# provenance - but the prompt has to describe the right thing, and a candidate
+# that is a place in code has no branch and no line count.
+DEPLOY_EVIDENCE = "deploy_records"
+CODE_EVIDENCE = "code_locations"
+
 # Words a plan may not use to smuggle a conclusion into the pipeline.
 VERDICT_TOKENS = ("proven", "refuted", "unresolved", "supported", "confirmed",
                   "disproved", "root cause is", "is the root cause")
@@ -68,10 +76,21 @@ class PlanRequest:
     failure_factor: float
     recovery_factor: float
     target_hypothesis: str
+    evidence_kind: str = DEPLOY_EVIDENCE
 
     @property
     def candidate_ids(self) -> Tuple[str, ...]:
-        return tuple(c["change_id"] for c in self.candidates)
+        """The identifiers the validator checks a proposal against.
+
+        A deploy record calls it change_id; a code location calls it id. Both
+        are opaque strings to everything downstream, which is exactly why the
+        validator needed no change when repositories arrived.
+        """
+        return tuple(str(c.get("id") or c.get("change_id")) for c in self.candidates)
+
+    @property
+    def is_code(self) -> bool:
+        return self.evidence_kind == CODE_EVIDENCE
 
 
 @dataclass(frozen=True)

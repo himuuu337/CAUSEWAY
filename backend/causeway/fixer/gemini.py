@@ -91,13 +91,55 @@ def build_prompt(request: FixRequest) -> str:
     which this function never imports.
     """
     candidate = request.candidate
-    lines = [
-        "HYPOTHESIS %s (%s - %s) has been PROVEN the cause of the incident by a "
-        "deterministic controlled experiment." % (
-            request.hypothesis_id, candidate.get("branch"), candidate.get("summary")),
-        "Why it was proven: %s" % request.causal_reason,
+    location = request.location or {}
+    if location:
+        # A repository: the hypothesis is a place in real source, so say
+        # where. Note what is still not here - the counterfactual the
+        # detector derived is the known-safe repair, and quoting it would
+        # hand the model the answer the validator exists to check.
+        lines = [
+            "HYPOTHESIS %s has been PROVEN the cause of the incident by a "
+            "deterministic controlled experiment." % request.hypothesis_id,
+            "It is a location in this repository's own source:",
+            "    file    %s" % location.get("file"),
+            "    line    %s" % location.get("line"),
+            "    symbol  %s()" % location.get("symbol"),
+            "    present %s" % json.dumps(location.get("observed", "")),
+            "Why it was proven: %s" % request.causal_reason,
+        ]
+    else:
+        lines = [
+            "HYPOTHESIS %s (%s - %s) has been PROVEN the cause of the incident by a "
+            "deterministic controlled experiment." % (
+                request.hypothesis_id, candidate.get("branch"), candidate.get("summary")),
+            "Why it was proven: %s" % request.causal_reason,
+        ]
+
+    lines += [
         "",
         "THE MECHANISM: %s" % request.mechanism,
+    ]
+
+    intent = request.intent or {}
+    if intent:
+        # The user's instruction is the goal. It is quoted, never rewritten,
+        # and the constraints below are the ones deterministic code will
+        # enforce after this proposal comes back - they are not suggestions
+        # the model may negotiate.
+        lines += ["", "WHAT THE USER ASKED FOR: %s"
+                  % json.dumps(intent.get("raw_instruction", ""))]
+        enforced = intent.get("enforced") or ()
+        if enforced:
+            lines.append("CONSTRAINTS THAT WILL BE ENFORCED ON YOUR PROPOSAL:")
+            for constraint in enforced:
+                lines.append("  - %s %s" % (constraint.get("kind"),
+                                            json.dumps(constraint.get("value"))))
+        advisory = intent.get("advisory") or ()
+        if advisory:
+            lines.append("STATED AS ADVISORY (recorded, not mechanically checked): %s"
+                         % "; ".join(str(c.get("source")) for c in advisory))
+
+    lines += [
         "",
         "REPAIR SURFACE AVAILABLE (the only thing you may change):",
     ]

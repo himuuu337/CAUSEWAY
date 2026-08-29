@@ -52,6 +52,12 @@ function rowOf(view: HypothesisView, phase: string): PhaseRow | undefined {
 export default function ExperimentPanel({ view, candidate, active }: Props) {
   if (!view.started) return null
 
+  // What to call this hypothesis on screen. A bundled candidate is A or B; a
+  // repository hypothesis is a file and a line, which is both shorter than
+  // its full identifier and more useful to a human reading the panel.
+  const short = view.code ? `${view.code.file}:${view.code.line}` : view.id
+  const subtitle = view.code ? `${view.code.symbol}()` : candidate?.branch
+
   const rows = EVIDENCE.map((phase) => rowOf(view, phase))
   const values = rows
     .map((row) => row?.p95_ms)
@@ -61,10 +67,10 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
   return (
     <section className="card exp">
       <div className="exp-head">
-        <span className="cand-id">{view.id}</span>
+        <span className="cand-id mono">{short}</span>
         <div>
           <div className="exp-name">Controlled experiment</div>
-          {candidate && <div className="exp-branch">{candidate.branch}</div>}
+          {subtitle && <div className="exp-branch mono">{subtitle}</div>}
         </div>
         <div className="spacer" />
         {view.verdict
@@ -73,6 +79,18 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
               {active ? 'MEASURING…' : 'AWAITING MEASUREMENT'}
             </span>}
       </div>
+
+      {view.code && (
+        <div className="exp-edit">
+          <span className="exp-edit-label">THE INTERVENTION IS AN EDIT</span>
+          <code className="hyp-observed">{view.code.observed}</code>
+          <span className="arrow">&rarr;</span>
+          <code className="hyp-counterfactual">{view.code.counterfactual}</code>
+          <span className="small faint">
+            applied to a disposable copy of the repository, one phase at a time
+          </span>
+        </div>
+      )}
 
       <div className="stages">
         {EVIDENCE.map((phase, index) => {
@@ -83,7 +101,7 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
             <Fragment key={phase}>
               {index > 0 && <div className="stage-sep" aria-hidden="true">&rarr;</div>}
               <div className={`stage ${state}`}>
-                <div className="stage-name">{view.id} {STAGE_WORD[phase]}</div>
+                <div className="stage-name mono">{short} {STAGE_WORD[phase]}</div>
 
                 <div className={`stage-value${row?.p95_ms === undefined ? ' pending' : ''}`}>
                   {row?.p95_ms !== undefined
@@ -117,7 +135,7 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
         <div className="summary-lines">
           {EVIDENCE.map((phase, index) => (
             <div key={phase}>
-              {view.id} {STAGE_WORD[phase]}
+              {short} {STAGE_WORD[phase]}
               <span className="arrow">&rarr;</span>
               <b className={rows[index]?.state ?? 'pending'}>
                 {summaryWord(phase, rows[index]?.state)}
@@ -129,7 +147,7 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
           <span className="label">VERDICT</span>
           {view.verdict
             ? <span className={`verdict-pill large ${view.verdict}`}>
-                {view.id} {view.verdict}
+                {short} {view.verdict}
               </span>
             : <span className="verdict-pill large waiting">PENDING</span>}
         </div>
@@ -144,6 +162,7 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
             <tr>
               <th>Phase</th><th>p95</th><th>p50</th><th>Reps</th>
               <th>Local control</th><th>Ratio</th><th>Judgement</th>
+              {view.code && <th>Source as measured</th>}
             </tr>
           </thead>
           <tbody>
@@ -158,6 +177,17 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
                 <td className={row.state ? `st-${row.state}` : ''}>
                   {row.state ? STATE_WORD[row.state] ?? row.state : ''}
                 </td>
+                {view.code && (
+                  <td className="mono small">
+                    {row.applied === undefined
+                      ? ''
+                      : row.applied.length === 0
+                        ? 'as cloned, unmodified'
+                        : row.applied
+                            .map((edit) => `${edit.file}:${edit.line} ${edit.after}`)
+                            .join(' · ')}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

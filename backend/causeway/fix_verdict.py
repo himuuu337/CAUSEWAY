@@ -53,6 +53,14 @@ FIX_BRACKETS = {
     FIX_AFTER: (FIX_CONTROL_2, FIX_CONTROL_3),
 }
 
+# Which phases run against the PATCHED build. The swap happens after
+# fix-before, so fix-control-2 is the first control measured on the patched
+# side - it is what establishes that healthy still costs the same there, and
+# fix-after is judged against it. This is a statement of the protocol, not a
+# threshold: an actuator reads it to know which phases carry the fix.
+FIX_UNPATCHED_PHASES = (FIX_CONTROL_1, FIX_BEFORE)
+FIX_PATCHED_PHASES = (FIX_CONTROL_2, FIX_AFTER, FIX_CONTROL_3)
+
 # ------------------------------------------------------------------ verdicts
 
 VERIFIED = "VERIFIED"

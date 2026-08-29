@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from causeway import config, stream, verdict
+from causeway import config, intent, stream, verdict
 from causeway.incident import INCIDENT
 from causeway.runs import AlreadyRunning, manager
 
@@ -84,13 +84,6 @@ def status() -> dict:
 
 @app.post("/api/investigation")
 def start_investigation(payload: Optional[dict] = Body(default=None)):
-    if not config.is_ready():
-        raise HTTPException(
-            status_code=503,
-            detail={"reason": "not-seeded",
-                    "message": "this machine is not seeded yet",
-                    "hint": "run: python -m causeway.cli seed"})
-
     # An optional {"repository_url": "..."} body. Absent, empty, or no body
     # at all - exactly what today's frontend already sends, and exactly what
     # a direct call (as the test suite makes) passes too, since `payload`
@@ -105,8 +98,37 @@ def start_investigation(payload: Optional[dict] = Body(default=None)):
             status_code=400,
             detail={"reason": "bad-request", "message": "repository_url must be a string"})
 
+    # The user's own instruction, and the mode they picked in the interface if
+    # they picked one. Both are carried verbatim to causeway.intent, which is
+    # the only thing that reads them; an unknown mode is rejected here rather
+    # than quietly reinterpreted, because guessing at a mode is how a run that
+    # was told to change nothing ends up changing something.
+    instruction = body.get("instruction") or None
+    if instruction is not None and not isinstance(instruction, str):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason": "bad-request", "message": "instruction must be a string"})
+    mode = body.get("mode") or None
+    if mode is not None and (not isinstance(mode, str) or mode not in intent.MODES):
+        raise HTTPException(
+            status_code=400,
+            detail={"reason": "bad-request",
+                    "message": "mode must be one of %s" % ", ".join(intent.MODES)})
+
+    # Seeding is the BUNDLED demo's precondition, not the product's: it
+    # builds Causeway's own template database. A repository brings its own
+    # schema and seed and builds its own database inside its own disposable
+    # workspace, so an unseeded machine can still investigate a repository.
+    if not repository_url and not config.is_ready():
+        raise HTTPException(
+            status_code=503,
+            detail={"reason": "not-seeded",
+                    "message": "this machine is not seeded yet",
+                    "hint": "run: python -m causeway.cli seed"})
+
     try:
-        run = manager.start(repository_url=repository_url)
+        run = manager.start(repository_url=repository_url, instruction=instruction,
+                            mode=mode)
     except AlreadyRunning as exc:
         # Not an error anyone needs to act on: the client attaches to the run
         # that is already in progress rather than being told no.

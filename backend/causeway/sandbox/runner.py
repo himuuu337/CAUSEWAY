@@ -181,14 +181,24 @@ class Sandbox:
     def replay_once(self, fixture: dict):
         return replay(self.host, self.port, fixture)
 
-    def measure(self, fixture: dict, flags: dict, repetitions: int = None) -> dict:
-        """Measure one state: restore, set the flags, replay, repeat, take the
+    def measure(self, fixture: dict, flags: dict = None,
+                repetitions: int = None) -> dict:
+        """Measure one state: restore, set the state, replay, repeat, take the
         median. Every phase in an experiment goes through this one function,
-        so no phase is measured more carefully than any other."""
+        so no phase is measured more carefully than any other.
+
+        `flags` is how the bundled demo expresses which candidates are present:
+        a runtime switch the service exposes. A repository-backed experiment
+        expresses the same thing in source instead - the process this Sandbox
+        was started against IS the state - so it passes no flags, and no
+        control endpoint is called. Both paths measure identically from here
+        on, which is what lets one verdict engine judge either.
+        """
         reps = max(1, int(REPETITIONS if repetitions is None else repetitions))
         signatures = []
         for _ in range(reps):
             self.restore()
-            self.set_flags(flags)
+            if flags:
+                self.set_flags(flags)
             signatures.append(measurement.compute(self.replay_once(fixture)))
         return measurement.aggregate(signatures)

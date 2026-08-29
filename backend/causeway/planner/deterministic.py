@@ -40,10 +40,11 @@ class DeterministicPlanner:
             "discriminates_between": [target] + others,
             "reasoning_summary": (
                 "Measure a healthy control on this machine, reproduce the "
-                "incident, then disable %s while holding %s fixed and replay "
+                "incident, then %s %s while holding %s fixed and replay "
                 "%s. If %s is causal, p95 should return to within %.1fx of the "
                 "control measured beside that phase; if it is not, the failure "
                 "will survive its removal."
-                % (target, ", ".join(others) or "nothing else",
+                % ("rewrite the code at" if request.is_code else "disable",
+                   target, ", ".join(others) or "nothing else",
                    request.fixtures[0], target, request.recovery_factor)),
         }

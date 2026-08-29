@@ -1,49 +1,43 @@
-# causeway-demo
+# causeway-order-demo
 
-A repository that follows the [Causeway](https://github.com/) demo contract
-(`causeway.json`), so Causeway's Milestone 6 GitHub-ingestion path has a real,
-public repository to investigate.
+A small order service that follows the [Causeway](https://github.com/) repository
+contract (`causeway.json`), so Causeway has a real repository to clone, run,
+investigate and patch.
 
-This is **not** a real production service. It is the same controlled
-order-service incident Causeway bundles for its own demo, checked in here so
-Causeway can clone it, validate it against the contract, and run the actual
-causal investigation and fix loop against code that came from GitHub rather
-than from Causeway's own checkout.
+The service is genuinely here: `app.py` serves the audit endpoint, `db.py`
+queries the database, `schema.sql` defines it, and `workload.json` is the
+traffic Causeway replays. Causeway builds the database from this repository's
+own schema and seed declaration - it does not bring its own data.
 
-## What's here
+## The incident
 
-- `causeway.json` - the manifest. Declares the service name, runtime,
-  entrypoint, workload fixture, the incident's deploy history, and the one
-  repair surface Causeway is allowed to patch in a disposable sandbox copy.
-- `service.py` - the order-service itself. Standard library only, on
-  purpose: Causeway launches this as a subprocess, never imports it, and
-  never installs a dependency on its behalf.
-- `fixtures/incident-001.json` - the recorded request workload replayed
-  identically across every experiment phase.
+The order audit endpoint got slow. Both queries on its hot path wrap an
+indexed column in an expression:
 
-## Publishing this repository
+    db.py  lookup_order_audit()    WHERE order_id + 0 = ?
+    db.py  lookup_status_label()   WHERE UPPER(code) = ?
 
-To make this the live demo repository Causeway points at:
+`order_audit.order_id` and `status_label.code` are both indexed, so static
+analysis flags both, and it is right to: a wrapped column cannot be matched
+against an index, and either one *could* be the problem.
 
-```
-cd demo-repo
-git init
-git add .
-git commit -m "Causeway demo repository"
-git branch -M main
-git remote add origin https://github.com/<your-account>/causeway-demo.git
-git push -u origin main
-```
+They are not the same, and nothing in this repository says which is which.
+`order_audit` holds 40,000 rows, so scanning it costs real time.
+`status_label` holds six, so scanning it costs nothing measurable. Only
+running the experiment tells them apart - which is the point.
 
-Then paste `https://github.com/<your-account>/causeway-demo` into Causeway's
-repository field and run the investigation.
+## What this manifest does and does not say
 
-## Expected result
+`causeway.json` declares capabilities and safe inputs: the runtime, the
+entrypoint, which files may be analysed, which may be patched, the schema and
+seed for the database, and the workload to replay.
 
-- Observational ranking: A ranks above B (the large refactor looks more
-  suspicious than the three-line predicate change)
-- Controlled experiment: A -> REFUTED, B -> PROVEN
-- Fix loop: B's proposed fix -> VERIFIED in a disposable sandbox copy
+It does **not** name a root cause, a correct hypothesis, or a repair. There is
+no deploy history and no answer key. Causeway has to find the suspects by
+reading the source, and has to settle between them by measuring.
 
-Nothing here is ever pushed to, committed to, or deployed from this
-repository by Causeway. A verified fix is shown for human review only.
+## Safety
+
+No command strings anywhere in the manifest. The schema may only create and
+drop tables, indexes and views; seed columns come from a closed set of kinds.
+Causeway runs `python app.py` and nothing else.

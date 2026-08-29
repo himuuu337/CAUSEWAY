@@ -15,7 +15,7 @@ import os
 import sys
 import textwrap
 
-from causeway import config, fix_verdict, verdict
+from causeway import config, fix_verdict, intent, verdict
 from causeway.sandbox import seed as seedmod
 from causeway.sandbox.replay import build_fixture, save_fixture
 from causeway.orchestrator import investigate
@@ -133,17 +133,52 @@ def cmd_investigate(args) -> int:
     style = Style(enabled=not args.no_color)
     offline = getattr(args, "offline", False) or None
     repository_url = getattr(args, "repository_url", None)
+    instruction = getattr(args, "instruction", None)
+    mode = getattr(args, "mode", None)
     judged = {}
     status = 0
 
-    for event in investigate(offline=offline, repository_url=repository_url):
+    # Step numbers are assigned in the order the stages actually happen, not
+    # hardcoded: the repository path has no observational ranking, and a
+    # printout that jumped from [1] to [3] would look like a missing stage
+    # rather than a stage that does not exist on that path.
+    steps = {}
+
+    def step(name: str) -> int:
+        return steps.setdefault(name, len(steps) + 1)
+
+    for event in investigate(offline=offline, repository_url=repository_url,
+                             instruction=instruction, mode=mode):
         kind = event["type"]
 
         if kind == "error":
             print(style.red(event["message"]), file=sys.stderr)
             return 2
 
-        if kind == "repository_validating":
+        if kind == "intent":
+            _rule(style.bold(" WHAT YOU ASKED FOR")
+                  + style.dim("   read by %s" % event["source"]))
+            if event["raw_instruction"]:
+                _wrap('"%s"' % event["raw_instruction"], "   ")
+            print("   mode            %s" % style.bold(event["mode"].upper()))
+            print("   persistent fix  %s"
+                  % (style.green("allowed") if event["allows_fix"]
+                     else style.dim(event["no_fix_reason"] or "not permitted")))
+            for constraint in event["enforced"]:
+                print("   enforced        %s %s"
+                      % (style.bold(constraint["kind"]), constraint["value"]))
+            for constraint in event["advisory"]:
+                print(style.dim("   advisory        %s (recorded, not checked)"
+                                % constraint["value"]))
+
+        elif kind == "needs_clarification":
+            print(style.yellow(style.bold("\n   CAUSEWAY NEEDS ONE ANSWER")))
+            _wrap(event["question"], "   ")
+            _wrap("Nothing was cloned and nothing was measured. Re-run with "
+                  "--mode " + " | --mode ".join(event["modes"]), "   ")
+            return 3
+
+        elif kind == "repository_validating":
             print(style.dim(" validating repository URL: %s" % event["url"]))
 
         elif kind == "repository_cloning":
@@ -155,8 +190,13 @@ def cmd_investigate(args) -> int:
             print(" commit %s   service %s   runtime %s"
                  % (event["commit_sha"][:12], event["service"], event["runtime"]))
             print(style.green("   supported Causeway project"))
-            for c in event["candidates"]:
-                print(style.dim("     %s  %s" % (c["change_id"], c["branch"])))
+            print(style.dim("   runs python %s   analyses %s   patchable %s"
+                            % (event["entrypoint"], ", ".join(event["sources"]),
+                               ", ".join(event["patchable"]))))
+            tables = ", ".join("%s %s rows" % (name, "{:,}".format(rows))
+                               for name, rows in sorted(event["database"]["tables"].items()))
+            print(style.dim("   database built from this repository's own schema: %s"
+                            % tables))
 
         elif kind == "repository_rejected":
             print(style.red(" UNSUPPORTED REPOSITORY (%s): %s"
@@ -166,24 +206,48 @@ def cmd_investigate(args) -> int:
             return 2
 
         elif kind == "incident":
-            incident, cal = event["incident"], event["calibration"]
+            incident = event["incident"]
+            cal = event.get("calibration")
             print("=" * WIDTH)
             print(style.bold(" CAUSEWAY   %s   %s"
                              % (incident["id"], incident["service"])))
             print(" %s   %s" % (incident["title"], incident["symptom"]))
-            print(style.dim(" healthy ~%.0f ms    incident ~%.0f ms    %.0fx    "
-                            "detected %s"
-                            % (cal["healthy_p95_ms"], cal["incident_p95_ms"],
-                               cal["ratio"], incident["detected_at"])))
+            if cal:
+                # the bundled demonstration was calibrated at seed time
+                print(style.dim(" healthy ~%.0f ms    incident ~%.0f ms    %.0fx    "
+                                "detected %s"
+                                % (cal["healthy_p95_ms"], cal["incident_p95_ms"],
+                                   cal["ratio"], incident["detected_at"])))
+            else:
+                # a repository has no calibration, and none is invented
+                print(style.dim(" detected %s   nothing measured yet"
+                                % incident["detected_at"]))
             print("=" * WIDTH)
+            replay = event.get("fixture") or event.get("workload")
             print(style.dim(" replay %s: %d requests, concurrency %d, %d repetitions "
-                            "per phase" % (event["fixture"]["id"],
-                                           event["fixture"]["requests"],
-                                           event["fixture"]["concurrency"],
+                            "per phase" % (replay["id"], replay["requests"],
+                                           replay["concurrency"],
                                            event["repetitions"])))
 
+        elif kind == "hypotheses":
+            _rule(style.bold(" [%d] SOURCE ANALYSIS" % step("analysis"))
+                  + style.dim("   deterministic detectors, no model"))
+            print("   %d location%s found in %s; %d testable."
+                  % (len(event["hypotheses"]),
+                     "" if len(event["hypotheses"]) == 1 else "s",
+                     ", ".join(event["sources"]), len(event["testable"])))
+            for h in event["hypotheses"]:
+                print("     %s   %s"
+                      % (style.bold(h["label"]), style.red(h["observed"])))
+                if h["counterfactual"]:
+                    print(style.dim("       would test    %s" % h["counterfactual"]))
+                _wrap(h["reason"], "       ")
+            _wrap("These are the same shape as one another. Static analysis cannot "
+                  "say which is causal - that is what the experiments are for.",
+                  "   ")
+
         elif kind == "candidates":
-            _rule(style.bold(" [1] CANDIDATE LOCALISATION")
+            _rule(style.bold(" [%d] CANDIDATE LOCALISATION" % step("localization"))
                   + style.dim("   deterministic, no model"))
             print("   %d deploys in the record; %d survive the service and window "
                   "filters." % (event["deploys_considered"], len(event["candidates"])))
@@ -197,7 +261,7 @@ def cmd_investigate(args) -> int:
                                 % (e["change_id"], e["branch"], e["reason"])))
 
         elif kind == "observational":
-            _rule(style.bold(" [2] OBSERVATIONAL RANKING")
+            _rule(style.bold(" [%d] OBSERVATIONAL RANKING" % step("observational"))
                   + style.dim("   correlation only, no experiment"))
             for rank, a in enumerate(event["assessments"], start=1):
                 print("   #%d  %s  %-34s score %s"
@@ -217,7 +281,7 @@ def cmd_investigate(args) -> int:
 
         elif kind == "plan":
             prov, plan = event["provenance"], event["plan"]
-            _rule(style.bold(" [3] EXPERIMENT PLAN  %s" % event["hypothesis"])
+            _rule(style.bold(" [%d] EXPERIMENT PLAN  %s" % (step("planning"), event["hypothesis"]))
                   + style.dim("   proposes only, never decides"))
             # three states, three labels. A run that never had a key is a
             # deterministic RUN, not a fallback, and must not be called one.
@@ -254,12 +318,20 @@ def cmd_investigate(args) -> int:
                                 "never read"))
 
         elif kind == "experiment_start":
-            _rule(style.bold(" [4] CONTROLLED EXPERIMENT  %s" % event["hypothesis"])
+            _rule(style.bold(" [%d] CONTROLLED EXPERIMENT  %s" % (step("experiment"), event["hypothesis"]))
                   + style.dim("   measurements decide"))
-            print(style.dim("   moving %s, holding %s fixed; a control is measured "
-                            "either side of every phase"
-                            % (event["intervention"]["flag"],
-                               ", ".join(event["holding_fixed"]) or "nothing")))
+            if event.get("label"):
+                # a repository: the intervention is an edit to real source
+                print(style.dim("   %s   %s -> %s"
+                                % (event["label"], event["observed"],
+                                   event["counterfactual"])))
+                print(style.dim("   applied to a disposable copy; a control is "
+                                "measured either side of every phase"))
+            else:
+                print(style.dim("   moving %s, holding %s fixed; a control is measured "
+                                "either side of every phase"
+                                % (event["intervention"]["flag"],
+                                   ", ".join(event["holding_fixed"]) or "nothing")))
             judged.clear()
 
         elif kind == "phase_result":
@@ -286,31 +358,48 @@ def cmd_investigate(args) -> int:
                                       style.bold(paint(decision))))
             _wrap(event["reason"], "        ")
 
+        elif kind == "fix_skipped":
+            _rule(style.bold(" NO FIX GENERATED")
+                  + style.dim("   %s" % event["mode"]))
+            _wrap(event["reason"] + ". The experiments above edited source only "
+                  "inside disposable copies - a diagnostic intervention, not a "
+                  "change anyone is being asked to keep.", "   ")
+
+        elif kind == "fix_blocked":
+            print("   " + style.yellow(style.bold("NO FIX PROPOSED")))
+            _wrap("%s (%s scope)" % (event["reason"], event["scope"]), "     ")
+
         elif kind == "conclusion":
-            _rule(style.bold(" [5] CONTRAST"))
-            print("   observational ranking put %s first."
-                  % style.bold(event["observational_top_suspect"]))
+            _rule(style.bold(" [%d] CONTRAST" % step("conclusion")))
+            if event.get("observational_top_suspect"):
+                print("   observational ranking put %s first."
+                      % style.bold(event["observational_top_suspect"]))
             for change_id, decision in event["verdicts"].items():
                 paint = getattr(style, _VERDICT_COLOUR[decision])
                 print("   experiment      %s  %s"
                       % (style.bold(change_id), style.bold(paint(decision))))
             print()
-            if event["correlation_selected_decoy"]:
+            proven = event.get("proven_labels") or event["proven"]
+            if event.get("correlation_selected_decoy"):
                 print("   " + style.red("Correlation selected the decoy."))
                 print("   " + style.green(
                     "Controlled intervention identified the causal change: %s."
-                    % ", ".join(event["proven"])))
-            elif event["proven"]:
+                    % ", ".join(proven)))
+            elif proven and event.get("observational_top_suspect"):
                 print("   " + style.green("Correlation and intervention agree: %s."
-                                          % ", ".join(event["proven"])))
+                                          % ", ".join(proven)))
+            elif proven:
+                print("   " + style.red("Static analysis could not tell these apart."))
+                print("   " + style.green("The experiment did: %s." % ", ".join(proven)))
             else:
-                print("   " + style.yellow("No candidate survived. Nothing is claimed."))
+                print("   " + style.yellow("Nothing survived its experiment. "
+                                           "Nothing is claimed."))
                 status = 3
             print(style.dim("   completed in %.1fs" % event["elapsed_s"]))
             print("=" * WIDTH)
 
         elif kind == "root_cause_proven":
-            _rule(style.bold(" [6] VERIFIED FIX LOOP  %s" % event["hypothesis"])
+            _rule(style.bold(" [%d] VERIFIED FIX LOOP  %s" % (step("fix"), event["hypothesis"]))
                   + style.dim("   only for a PROVEN cause"))
 
         elif kind == "fix_plan":
@@ -362,7 +451,9 @@ def cmd_investigate(args) -> int:
 def cmd_events(args) -> int:
     offline = getattr(args, "offline", False) or None
     repository_url = getattr(args, "repository_url", None)
-    for event in investigate(offline=offline, repository_url=repository_url):
+    for event in investigate(offline=offline, repository_url=repository_url,
+                             instruction=getattr(args, "instruction", None),
+                             mode=getattr(args, "mode", None)):
         print(json.dumps(event), flush=True)
         if event["type"] in ("error", "repository_rejected"):
             return 2
@@ -453,11 +544,19 @@ def main(argv=None) -> int:
                      help="force the deterministic planner, never call Gemini")
     run.add_argument("--repository-url", default=None,
                      help="investigate a GitHub repository (https://github.com/<owner>/<repo>) "
-                          "instead of the bundled demo")
+                          "instead of the bundled demonstration")
+    run.add_argument("--instruction", default=None,
+                     help="what Causeway should do with the repository, in your own "
+                          "words - e.g. \"find why it is slow, do not modify anything\"")
+    run.add_argument("--mode", default=None, choices=list(intent.MODES),
+                     help="state the mode explicitly instead of letting the "
+                          "instruction be read for one")
 
     events = sub.add_parser("events", help="the same run as raw NDJSON events")
     events.add_argument("--offline", action="store_true")
     events.add_argument("--repository-url", default=None)
+    events.add_argument("--instruction", default=None)
+    events.add_argument("--mode", default=None, choices=list(intent.MODES))
 
     check = sub.add_parser("gemini-check",
                            help="is the Gemini planner configured and working")

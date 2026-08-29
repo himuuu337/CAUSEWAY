@@ -5,16 +5,25 @@
  * Every latency, phase state, planner provenance, validator result and verdict
  * on screen arrived from the backend; nothing here is computed, inferred or
  * revealed before the event that carries it.
+ *
+ * There are two investigations behind one form, and the page renders whichever
+ * one the backend actually ran. A repository investigation shows the locations
+ * a detector found in that repository's own source; the bundled demonstration
+ * shows its own A/B candidates and says, in its own panel, that it is a
+ * demonstration. Neither set of components is ever shown for the other run.
  */
 import { useState } from 'react'
 import Header from './components/Header'
+import IntentPanel from './components/IntentPanel'
 import RepositoryPanel from './components/RepositoryPanel'
 import IncidentCard from './components/IncidentCard'
 import Pipeline from './components/Pipeline'
 import Candidates from './components/Candidates'
+import HypothesisPanel from './components/HypothesisPanel'
 import PlanPanel from './components/PlanPanel'
 import ExperimentPanel from './components/ExperimentPanel'
 import Conclusion from './components/Conclusion'
+import RepositoryConclusion from './components/RepositoryConclusion'
 import FixPanel from './components/FixPanel'
 import Roadmap from './components/Roadmap'
 import EventFeed from './components/EventFeed'
@@ -22,9 +31,19 @@ import type { HypothesisView } from './useInvestigation'
 import { useInvestigation } from './useInvestigation'
 import './styles.css'
 
+/** The three things a user can ask for, plus letting the words decide. */
+const MODES = [
+  { value: '', label: 'Read my instruction' },
+  { value: 'diagnose_only', label: 'Diagnose only' },
+  { value: 'diagnose_and_fix', label: 'Diagnose and fix' },
+  { value: 'requested_change', label: 'Requested change' },
+] as const
+
 export default function App() {
   const { state, health, busy, starting, start, pipeline } = useInvestigation()
   const [repoUrl, setRepoUrl] = useState('')
+  const [instruction, setInstruction] = useState('')
+  const [mode, setMode] = useState<string>('')
 
   const notSeeded = health !== null && !health.seeded
   const views: HypothesisView[] = state.order
@@ -32,13 +51,17 @@ export default function App() {
     .filter((view): view is HypothesisView => view !== undefined)
 
   const hasRepoInput = repoUrl.trim().length > 0
+  // Which run this is, decided by what the backend emitted - never by what
+  // was typed into the form.
+  const isRepositoryRun = state.repository !== undefined
+
   const buttonLabel = starting
     ? 'STARTING…'
     : state.runState === 'running'
       ? 'INVESTIGATION RUNNING…'
       : hasRepoInput
-        ? 'ANALYZE & RUN CAUSAL INVESTIGATION'
-        : 'RUN CAUSAL INVESTIGATION'
+        ? 'ANALYZE REPOSITORY & RUN CAUSAL INVESTIGATION'
+        : 'RUN THE BUNDLED DEMONSTRATION'
 
   // The live investigation's own incident (from the manifest, in repository
   // mode) takes priority over the bundled demo's health-endpoint defaults,
@@ -68,28 +91,61 @@ export default function App() {
           className="repo-input"
           type="text"
           inputMode="url"
-          placeholder="https://github.com/owner/repo  (leave blank for the bundled demo)"
+          placeholder="https://github.com/owner/repo  (leave blank for the bundled demonstration)"
           value={repoUrl}
           onChange={(event) => setRepoUrl(event.target.value)}
           disabled={busy}
         />
       </div>
 
+      <div className="repo-input-row">
+        <label className="repo-label" htmlFor="instruction">What should Causeway do</label>
+        <input
+          id="instruction"
+          className="repo-input"
+          type="text"
+          placeholder="e.g. find why the audit endpoint is slow — do not modify anything"
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          disabled={busy || !hasRepoInput}
+        />
+        <select
+          className="mode-select"
+          value={mode}
+          onChange={(event) => setMode(event.target.value)}
+          disabled={busy || !hasRepoInput}
+          aria-label="Mode"
+        >
+          {MODES.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </div>
+      {!hasRepoInput && (
+        <div className="hint indent">
+          instructions apply to a repository investigation — the bundled
+          demonstration always runs its own fixed scenario
+        </div>
+      )}
+
       <div className="action">
-        <button className="run-btn" onClick={() => start(repoUrl.trim() || undefined)}
-               disabled={busy || notSeeded}>
+        <button
+          className="run-btn"
+          onClick={() => start(repoUrl.trim() || undefined, instruction, mode || undefined)}
+          disabled={busy || (!hasRepoInput && notSeeded)}
+        >
           {buttonLabel}
         </button>
         <span className="hint">
-          {notSeeded
+          {!hasRepoInput && notSeeded
             ? health?.hint ?? 'this machine is not seeded yet'
             : state.runState === 'running'
               ? `streaming — ${state.events.length} events received`
               : state.runState === 'completed'
                 ? 'complete — run it again to measure this machine afresh'
                 : hasRepoInput
-                  ? 'clones the repository, validates it against the Causeway demo contract, then runs the same investigation'
-                  : 'reproduces the incident in a sandbox, removes one change at a time, and measures'}
+                  ? 'clones the repository, builds its database from its own schema, reads its source for suspects, then settles them by measuring'
+                  : 'reproduces a fabricated incident in a sandbox, removes one change at a time, and measures'}
         </span>
       </div>
 
@@ -99,6 +155,10 @@ export default function App() {
         </div>
       )}
       {state.error && <div className="banner">{state.error}</div>}
+
+      {state.intent && (
+        <IntentPanel intent={state.intent} clarification={state.clarification} />
+      )}
 
       {state.repository && <RepositoryPanel view={state.repository} />}
 
@@ -110,13 +170,21 @@ export default function App() {
 
       <Pipeline stages={pipeline} />
 
-      <Candidates
-        candidates={state.candidates}
-        excluded={state.excluded}
-        assessments={state.assessments}
-        topSuspect={state.topSuspect}
-        deploysConsidered={state.deploysConsidered}
-      />
+      {isRepositoryRun ? (
+        <HypothesisPanel
+          hypotheses={state.found}
+          detectors={state.detectors}
+          sources={state.repository?.sources ?? []}
+        />
+      ) : (
+        <Candidates
+          candidates={state.candidates}
+          excluded={state.excluded}
+          assessments={state.assessments}
+          topSuspect={state.topSuspect}
+          deploysConsidered={state.deploysConsidered}
+        />
+      )}
 
       <PlanPanel views={views} />
 
@@ -133,11 +201,17 @@ export default function App() {
       ))}
 
       {state.conclusion && (
-        <Conclusion
-          conclusion={state.conclusion}
-          assessments={state.assessments}
-          candidates={state.candidates}
-        />
+        isRepositoryRun
+          ? <RepositoryConclusion
+              conclusion={state.conclusion}
+              found={state.found}
+              fixSkipped={state.fixSkipped}
+            />
+          : <Conclusion
+              conclusion={state.conclusion}
+              assessments={state.assessments}
+              candidates={state.candidates}
+            />
       )}
 
       {state.fixOrder.length > 0 && (
