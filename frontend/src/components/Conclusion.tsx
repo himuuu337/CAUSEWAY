@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { Assessment, CausewayEvent, Candidate } from '../types'
 import { seconds } from '../format'
 
@@ -9,7 +10,7 @@ interface Props {
   candidates: Candidate[]
 }
 
-export default function Conclusion({ conclusion, assessments, candidates }: Props) {
+function Conclusion({ conclusion, assessments, candidates }: Props) {
   const branchOf: Record<string, string> = {}
   candidates.forEach((candidate) => { branchOf[candidate.change_id] = candidate.branch })
   const proven = conclusion.proven
@@ -86,7 +87,7 @@ export default function Conclusion({ conclusion, assessments, candidates }: Prop
         <section className="card">
           <div className="card-head">
             <h2 className="card-title">Causal chain</h2>
-            <span className="card-note">demo incident explanation</span>
+            <span className="card-note">fixed explanation for this seeded scenario, not derived from the run</span>
           </div>
           <div className="chain">
             <div className="chain-step first">
@@ -126,3 +127,5 @@ export default function Conclusion({ conclusion, assessments, candidates }: Prop
     </>
   )
 }
+
+export default memo(Conclusion)
