@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { CausewayEvent } from '../types'
 import { ms } from '../format'
 
@@ -13,7 +14,7 @@ interface Props {
  * Measured on this machine at setup, not shipped as a constant. Until the
  * incident event arrives there is nothing honest to show, so nothing is shown.
  */
-export default function IncidentCard({ incident, title, service }: Props) {
+function IncidentCard({ incident, title, service }: Props) {
   const cal = incident?.calibration
   const healthy = cal?.healthy_p95_ms
   const broken = cal?.incident_p95_ms
@@ -69,3 +70,5 @@ export default function IncidentCard({ incident, title, service }: Props) {
     </section>
   )
 }
+
+export default memo(IncidentCard)
