@@ -27,7 +27,7 @@ import urllib.request
 from causeway.planner.schema import PlanRequest, ProviderUnavailable
 
 API_HOST = "https://generativelanguage.googleapis.com"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TIMEOUT = 20.0
 
 # The boundary, stated in the model's own context.

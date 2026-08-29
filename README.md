@@ -250,7 +250,7 @@ session:
 
 Optional:
 
-    $env:CAUSEWAY_GEMINI_MODEL="gemini-2.5-flash"   # default
+    $env:CAUSEWAY_GEMINI_MODEL="gemini-3.6-flash"   # default
     $env:CAUSEWAY_GEMINI_TIMEOUT="20"               # seconds
     $env:CAUSEWAY_OFFLINE="1"                       # never call Gemini
 

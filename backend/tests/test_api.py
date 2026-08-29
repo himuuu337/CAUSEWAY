@@ -8,6 +8,7 @@ what to put in a response, and none of it needs a socket.
 from __future__ import annotations
 
 import json
+import threading
 import unittest
 
 try:
@@ -25,8 +26,27 @@ def body_of(response) -> dict:
     return json.loads(response.body)
 
 
-def never_finishes():
-    yield {"type": "stage", "stage": "experiment", "status": "running"}
+class BlockingRun:
+    """A run source that stays in STATE_RUNNING until explicitly released.
+
+    The fixture it replaces (`never_finishes`) was a generator that yielded
+    once and returned - the background thread could complete the run before
+    the test's second request landed, racing the very thing under test. This
+    blocks the generator on a threading.Event instead, so the run is
+    deterministically still running for as long as the test needs it to be,
+    on any machine or scheduler. `release()` must be called - in a `finally`
+    or `tearDown` - or the background thread blocks forever.
+    """
+
+    def __init__(self):
+        self._release = threading.Event()
+
+    def release(self) -> None:
+        self._release.set()
+
+    def __call__(self):
+        yield {"type": "stage", "stage": "experiment", "status": "running"}
+        self._release.wait()
 
 
 @unittest.skipIf(api is None, SKIP)
@@ -68,10 +88,16 @@ class ConflictTests(unittest.TestCase):
 
     def setUp(self):
         self.original = api.manager
-        api.manager = RunManager(source=never_finishes)
+        self.blocking = BlockingRun()
+        api.manager = RunManager(source=self.blocking)
         self.run = api.manager.start()
 
     def tearDown(self):
+        # Unblock the worker thread and wait for it before restoring the
+        # manager, so a failed assertion above can never leave a thread
+        # running against a RunManager the rest of the suite no longer sees.
+        self.blocking.release()
+        api.manager.join(timeout=5)
         api.manager = self.original
 
     def test_a_second_start_is_a_409(self):

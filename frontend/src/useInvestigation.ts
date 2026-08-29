@@ -231,7 +231,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
  * deterministic run is never called a fallback, and nothing is ever called
  * Gemini unless the backend reported `kind: "gemini"`.
  */
-/** `gemini:gemini-2.5-flash` reads better as just the model. */
+/** `gemini:gemini-3.6-flash` reads better as just the model. */
 export function modelOf(source: string): string {
   return source.startsWith('gemini:') ? source.slice('gemini:'.length) : source
 }
