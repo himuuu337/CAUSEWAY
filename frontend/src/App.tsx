@@ -101,12 +101,12 @@ export default function App() {
       </div>
 
       <div className="repo-input-row">
-        <label className="repo-label" htmlFor="instruction">What should Causeway do</label>
-        <input
+        <label className="repo-label" htmlFor="instruction">What should Causeway do?</label>
+        <textarea
           id="instruction"
-          className="repo-input"
-          type="text"
-          placeholder="e.g. find why the audit endpoint is slow — do not modify anything"
+          className="repo-input instruction-input"
+          rows={2}
+          placeholder="e.g. Fix the bug in this repository and explain the changes"
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
           disabled={busy || !hasRepoInput}
@@ -164,13 +164,16 @@ export default function App() {
 
       {state.repository && <RepositoryPanel view={state.repository} />}
 
-      <IncidentCard
-        incident={state.incident}
-        title={incidentTitle}
-        service={incidentService}
-      />
-
-      <Pipeline stages={pipeline} />
+      {!isRequestedChangeRun && (
+        <>
+          <IncidentCard
+            incident={state.incident}
+            title={incidentTitle}
+            service={incidentService}
+          />
+          <Pipeline stages={pipeline} />
+        </>
+      )}
 
       {isRequestedChangeRun ? (
         <RequestedChangePanel view={state.requestedChange!} />

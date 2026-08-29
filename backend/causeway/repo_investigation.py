@@ -36,42 +36,6 @@ def _stage(name: str, status: str, **extra) -> dict:
                  "t": round(time.time(), 3)}, **extra)
 
 
-def acquire(repository_url: str):
-    """Validate, clone and load, yielding lifecycle events.
-
-    Yields a RepositoryContext as its last item on success, or None after a
-    `repository_rejected` event - so a caller can tell the two apart without
-    inspecting event dicts. Nothing before that point touches a sandbox.
-    """
-    yield {"type": "repository_validating", "url": repository_url}
-    try:
-        ref = repository.validate_url(repository_url)
-    except repository.RepositoryRejected as exc:
-        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
-        yield None
-        return
-
-    yield {"type": "repository_cloning", "owner": ref.owner, "name": ref.name,
-           "url": ref.url}
-    try:
-        cloned = repository.clone(ref)
-    except repository.RepositoryRejected as exc:
-        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
-        yield None
-        return
-
-    try:
-        context = repository.load(cloned, ref)
-    except repository.RepositoryRejected as exc:
-        cloned.cleanup()
-        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
-        yield None
-        return
-
-    yield dict({"type": "repository_loaded"}, **context.as_event())
-    yield context
-
-
 def _experiment(actuator, context, hypothesis_id: str, state: Mapping[str, bool],
                 specs: Sequence, reps: int):
     """Measure the seven phases for one hypothesis. Yields events; the last

@@ -385,6 +385,7 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .repo-input::placeholder { color: var(--text-faint); }
 .repo-input:focus { outline: none; border-color: var(--blue); }
 .repo-input:disabled { color: var(--text-faint); cursor: not-allowed; }
+.instruction-input { font-family: var(--sans); resize: vertical; min-height: 40px; }
 
 .repo-card { border-color: var(--line-strong); }
 .verdict-pill.repo-validating, .verdict-pill.repo-cloning {
@@ -442,6 +443,7 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .verdict-pill.fix-VERIFIED { color: var(--green); border-color: var(--green); background: var(--green-bg); }
 .verdict-pill.fix-FAILED { color: var(--red); border-color: var(--red); background: var(--red-bg); }
 .verdict-pill.fix-UNRESOLVED { color: var(--amber); border-color: var(--amber); background: var(--amber-bg); }
+.verdict-pill.fix-IMPLEMENTED_VERIFICATION_INCOMPLETE { color: var(--blue); border-color: var(--blue); }
 
 .sandbox-notice {
   margin-top: 14px; padding: 10px 13px; border-radius: var(--radius);

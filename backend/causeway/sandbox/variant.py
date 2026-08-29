@@ -27,7 +27,7 @@ import shutil
 import stat
 import tempfile
 from dataclasses import dataclass
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 # Directories never copied into a variant: version-control metadata, caches,
 # and anything else that only makes the copy slower.
@@ -84,7 +84,7 @@ def _force_remove(func, path, exc_info):
 @dataclass
 class SourceVariant:
     root: str                       # the disposable copy of the workspace
-    service_path: str               # the entrypoint inside that copy
+    service_path: Optional[str]     # the entrypoint inside that copy, if any
     applied: Tuple[AppliedEdit, ...]
     workdir: str                    # disposable parent; removed whole
 
@@ -136,21 +136,28 @@ def _apply_edit(root: str, edit: SourceEdit) -> AppliedEdit:
     return AppliedEdit(edit.file, edit.before, edit.after, edit.label, line)
 
 
-def materialise(workspace: str, entrypoint: str,
+def materialise(workspace: str, entrypoint: Optional[str],
                 edits: Sequence[SourceEdit] = ()) -> SourceVariant:
     """Copy `workspace` and apply `edits` to the copy.
 
     Raises VariantRejected - having removed the copy - if any edit cannot be
     applied. A partially edited variant is never returned and never run.
-    """
-    entrypoint_rel = os.path.relpath(entrypoint, workspace) \
-        if os.path.isabs(entrypoint) else entrypoint
 
+    `entrypoint` is None for a variant that will never be launched as a
+    service - a standard (manifest-less) repository, where Causeway has no
+    reliable way to start or run the code and does not guess one. The copy
+    and the edits happen exactly the same either way; only the resolved
+    `service_path` is absent.
+    """
     workdir = tempfile.mkdtemp(prefix="causeway-variant-")
     root = os.path.join(workdir, "repo")
     try:
         shutil.copytree(workspace, root, ignore=_SKIP, symlinks=False)
-        service_path = resolve_inside(root, entrypoint_rel)
+        service_path = None
+        if entrypoint is not None:
+            entrypoint_rel = os.path.relpath(entrypoint, workspace) \
+                if os.path.isabs(entrypoint) else entrypoint
+            service_path = resolve_inside(root, entrypoint_rel)
         applied = tuple(_apply_edit(root, edit) for edit in edits)
     except BaseException:
         shutil.rmtree(workdir, onerror=_force_remove)

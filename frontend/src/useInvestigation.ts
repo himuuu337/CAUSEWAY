@@ -103,6 +103,16 @@ export interface RequestedChangeView {
   after: VerificationCase[]
   verdict?: RequestedChangeVerdict
   reason?: string
+  /** Present only on the standard (manifest-less) path. */
+  standard?: {
+    language: string
+    entrypoint: string | null
+    allPythonFiles: number
+    filesSelected: string[]
+    testsDetected: boolean
+    testsNote: string
+  }
+  syntaxChecks?: { file: string; passed: boolean; detail: string }[]
 }
 
 /** The repository lifecycle, folded from repository_* events only. `status`
@@ -123,6 +133,12 @@ export interface RepositoryView {
   workload?: WorkloadSummary
   status: 'validating' | 'cloning' | 'loaded' | 'rejected'
   rejection?: { stage: string; reason: string }
+  /** 'standard' when this repository has no causeway.json - read and
+   * proposed against directly, with no controlled causal experiment. */
+  contract?: 'causeway' | 'standard'
+  testsDetected?: boolean
+  testsNote?: string
+  allPythonFiles?: number
 }
 
 export interface PipelineStage {
@@ -476,10 +492,35 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
         service: event.service, runtime: event.runtime,
         verification: event.verification, entrypoint: event.entrypoint,
         sources: event.sources, patchable: event.patchable,
-        database: event.database, workload: event.workload,
+        database: event.database ?? undefined, workload: event.workload ?? undefined,
+        contract: event.contract ?? 'causeway',
+        testsDetected: event.tests_detected, testsNote: event.tests_note,
+        allPythonFiles: event.all_python_files,
         status: 'loaded',
       }
       return next
+
+    case 'standard_repository':
+      next.requestedChange = {
+        ...(state.requestedChange
+          ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        standard: {
+          language: event.language, entrypoint: event.entrypoint,
+          allPythonFiles: event.all_python_files, filesSelected: event.files_selected,
+          testsDetected: event.tests_detected, testsNote: event.tests_note,
+        },
+      }
+      return next
+
+    case 'syntax_check': {
+      const base = state.requestedChange
+        ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
+      next.requestedChange = {
+        ...base,
+        syntaxChecks: [...(base.syntaxChecks ?? []), event],
+      }
+      return next
+    }
 
     case 'repository_rejected':
       // Surfaced by RepositoryPanel, not the generic error banner - it

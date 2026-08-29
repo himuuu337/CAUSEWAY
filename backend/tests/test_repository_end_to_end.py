@@ -223,13 +223,31 @@ class RejectionNeverReachesTheSandboxTests(unittest.TestCase):
                                  "repository_rejected"])
 
     def test_an_unsupported_repository_is_rejected_before_the_sandbox(self):
-        with local_repo({"README.md": "no manifest here"}) as source:
+        """No causeway.json AND no supported language: the standard path
+        still rejects it, just for what it actually is - nothing Causeway's
+        prototype can read - rather than for lacking a manifest it was never
+        required to have."""
+        with local_repo({"README.md": "no manifest, no python, no nothing"}) as source:
             with mock.patch("causeway.repository.clone", _cloning_from(source)):
                 events = _run(repository_url=REPO_URL, instruction=self.INSTRUCTION)
         types = [e["type"] for e in events]
         self.assertEqual(types, ["intent", "repository_validating",
                                  "repository_cloning", "repository_rejected"])
         rejection = events[-1]
+        self.assertEqual(rejection["stage"], "analysis")
+        self.assertNotIn("causeway.json", rejection["reason"])
+
+    def test_a_present_but_broken_manifest_is_still_rejected_at_the_manifest_stage(self):
+        """A repository that OPTS IN to the causeway.json contract and gets
+        it wrong is held to it - the standard path is a fallback for a
+        repository that never declared the contract at all, never a quiet
+        rescue for one that tried and failed."""
+        with local_repo({"causeway.json": "{not valid json",
+                         "app.py": "print('hi')\n"}) as source:
+            with mock.patch("causeway.repository.clone", _cloning_from(source)):
+                events = _run(repository_url=REPO_URL, instruction=self.INSTRUCTION)
+        rejection = events[-1]
+        self.assertEqual(rejection["type"], "repository_rejected")
         self.assertEqual(rejection["stage"], "manifest")
 
     def test_a_rejected_repository_workspace_is_still_cleaned_up(self):

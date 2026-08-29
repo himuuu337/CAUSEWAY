@@ -204,7 +204,13 @@ export interface VerificationCase {
   error: string | null
 }
 
-export type RequestedChangeVerdict = 'VERIFIED' | 'FAILED' | 'UNRESOLVED'
+export type RequestedChangeVerdict =
+  | 'VERIFIED' | 'FAILED' | 'UNRESOLVED'
+  // The standard (manifest-less) path: a patch was applied to a disposable
+  // copy and passed whatever cheap, safe check was available (syntax), but
+  // there was no reliable way to run the repository or its tests, so
+  // runtime behaviour was never actually verified. Never shown as VERIFIED.
+  | 'IMPLEMENTED_VERIFICATION_INCOMPLETE'
 
 export type CausewayEvent =
   | { type: 'stage'; stage: string; status: 'running' | 'done'; t: number }
@@ -310,10 +316,28 @@ export type CausewayEvent =
       entrypoint: string
       sources: string[]
       patchable: string[]
-      database: DatabaseSummary
-      workload: WorkloadSummary
+      // absent (null) on the standard path: no causeway.json means no
+      // database built and no workload declared - never fabricated.
+      database: DatabaseSummary | null
+      workload: WorkloadSummary | null
+      /** Which of the two repository paths this run is on. Absent on older
+       * buffered events read as `undefined`, treated the same as 'causeway'. */
+      contract?: 'causeway' | 'standard'
+      tests_detected?: boolean
+      tests_note?: string
+      all_python_files?: number
     }
   | { type: 'repository_rejected'; stage: string; reason: string }
+  | {
+      type: 'standard_repository'
+      language: string
+      entrypoint: string | null
+      all_python_files: number
+      files_selected: string[]
+      tests_detected: boolean
+      tests_note: string
+    }
+  | { type: 'syntax_check'; file: string; passed: boolean; detail: string }
   | { type: 'requested_change_start'; instruction: string; goal: string; files_considered: string[] }
   | ({ type: 'patch_plan'; patch: CodePatch; provenance: Provenance })
   | ({ type: 'patch_validation' } & Validation)

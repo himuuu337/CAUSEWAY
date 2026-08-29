@@ -28,20 +28,29 @@ from typing import Any, Mapping, Sequence, Tuple
 
 from causeway.analysis import detectors
 from causeway.analysis.hypothesis import CodeHypothesis
-from causeway.repository import database, git, manifest, urlcheck
+from causeway.repository import database, git, manifest, standard, urlcheck
 from causeway.repository.errors import RepositoryRejected
 from causeway.repository.git import CLONE_TIMEOUT, ClonedRepo
-from causeway.repository.manifest import Manifest
+from causeway.repository.manifest import MANIFEST_FILENAME, Manifest
+from causeway.repository.standard import StandardRepositoryContext
 from causeway.repository.urlcheck import RepoRef
 
 __all__ = ["RepositoryRejected", "RepoRef", "ClonedRepo", "Manifest",
-           "RepositoryContext", "validate_url", "clone", "load"]
+           "RepositoryContext", "StandardRepositoryContext", "validate_url",
+           "clone", "load", "has_manifest", "acquire"]
 
 validate_url = urlcheck.validate_url
 
 
 def clone(ref: RepoRef, timeout: float = CLONE_TIMEOUT, source: str = None) -> ClonedRepo:
     return git.clone(ref, timeout=timeout, source=source)
+
+
+def has_manifest(workspace: str) -> bool:
+    """Whether this repository opted into the causeway.json contract - the
+    controlled causal experiment. Its absence is not a rejection: it is the
+    signal to read the repository the standard way instead."""
+    return os.path.isfile(os.path.join(workspace, MANIFEST_FILENAME))
 
 
 def _validate_workload(raw: Any) -> Mapping[str, Any]:
@@ -117,6 +126,7 @@ class RepositoryContext:
             "workload": {"id": self.workload["id"],
                          "requests": len(self.workload["requests"]),
                          "concurrency": self.workload["concurrency"]},
+            "contract": "causeway",
         }
 
 
@@ -167,3 +177,56 @@ def load(cloned: ClonedRepo, ref: RepoRef) -> RepositoryContext:
         work_db=os.path.join(data_dir, "work.db"), database_info=info,
         cloned=cloned,
     )
+
+
+def acquire(repository_url: str, instruction: str = ""):
+    """Validate, clone, and load - the front door for BOTH repository paths.
+
+    causeway.json is checked for only after the clone exists, and its
+    presence is what decides which of the two loaders runs - never whether
+    the repository is accepted at all:
+
+        present      the causeway.json v2 contract: `load`, a database built
+                     from the repository's own schema, hypotheses read out
+                     of its own source, a controlled causal experiment.
+        absent       `standard.load_standard`: no manifest, no database, no
+                     workload - a detected language, a bounded, scored
+                     selection of the repository's own source, and whatever
+                     verification is actually available for it.
+
+    Yields lifecycle events; the last item is the loaded context (a
+    RepositoryContext or a StandardRepositoryContext) or None after a
+    `repository_rejected` event, so a caller can tell the two apart without
+    inspecting event dicts. Nothing before a `repository_loaded` event
+    touches a sandbox.
+    """
+    yield {"type": "repository_validating", "url": repository_url}
+    try:
+        ref = validate_url(repository_url)
+    except RepositoryRejected as exc:
+        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
+        yield None
+        return
+
+    yield {"type": "repository_cloning", "owner": ref.owner, "name": ref.name,
+           "url": ref.url}
+    try:
+        cloned = clone(ref)
+    except RepositoryRejected as exc:
+        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
+        yield None
+        return
+
+    try:
+        if has_manifest(cloned.path):
+            context = load(cloned, ref)
+        else:
+            context = standard.load_standard(cloned, ref, instruction)
+    except RepositoryRejected as exc:
+        cloned.cleanup()
+        yield {"type": "repository_rejected", "stage": exc.stage, "reason": exc.reason}
+        yield None
+        return
+
+    yield dict({"type": "repository_loaded"}, **context.as_event())
+    yield context

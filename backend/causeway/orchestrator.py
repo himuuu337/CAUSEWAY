@@ -45,7 +45,7 @@ from typing import Iterator
 
 from causeway import (config, fix_verdict, fixer, intent as intent_module,
                       observational, planner, repo_investigation, repository,
-                      requested_change, verdict)
+                      requested_change, standard_investigation, verdict)
 from causeway.incident import deploy_record
 from causeway.localizer import localize
 from causeway.sandbox import fixapply
@@ -130,16 +130,26 @@ def _repository_investigation(repository_url, instruction, mode, reps, offline):
         return
 
     context = None
+    is_standard = False
     try:
         rejected = True
-        for item in repo_investigation.acquire(repository_url):
-            if isinstance(item, repository.RepositoryContext):
+        for item in repository.acquire(repository_url, instruction=spec.raw_instruction):
+            if isinstance(item, repository.StandardRepositoryContext):
+                context, rejected, is_standard = item, False, True
+            elif isinstance(item, repository.RepositoryContext):
                 context, rejected = item, False
             elif item is not None:
                 yield item
         if rejected:
             return
-        if spec.mode == intent_module.REQUESTED_CHANGE:
+        if is_standard:
+            # No causeway.json: read, propose, validate, apply to a
+            # disposable copy, verify whatever is actually verifiable.
+            # Every mode funnels here - there is no controlled causal
+            # experiment to run without a manifest's workload and schema.
+            for event in standard_investigation.run(context, spec, offline):
+                yield event
+        elif spec.mode == intent_module.REQUESTED_CHANGE:
             for event in requested_change.run(context, spec, offline):
                 yield event
         else:

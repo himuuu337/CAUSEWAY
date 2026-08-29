@@ -8,6 +8,7 @@ interface Props {
 
 const VERDICT_WORD: Record<string, string> = {
   VERIFIED: 'CHANGE VERIFIED', FAILED: 'CHANGE FAILED', UNRESOLVED: 'UNRESOLVED',
+  IMPLEMENTED_VERIFICATION_INCOMPLETE: 'IMPLEMENTED — VERIFICATION INCOMPLETE',
 }
 
 function plannerLabel(view: RequestedChangeView): string {
@@ -44,10 +45,15 @@ function CaseRow({ item }: { item: VerificationCase }) {
 /**
  * "Make requested change" mode's own loop: an instruction goes in, a
  * Gemini-authored (or deterministic fallback) CodePatch comes out, code
- * validates it, and real HTTP requests against a disposable, patched copy of
- * the service - not Gemini's own say-so - decide whether it actually did
- * what was asked. Everything on this panel arrived on an event the backend
- * emitted.
+ * validates it, and objective evidence - not Gemini's own say-so - decides
+ * whether it actually did what was asked.
+ *
+ * Two repositories can reach this panel. A causeway.json repository
+ * declares real probes, so the evidence is a real HTTP request sent to a
+ * disposable copy before and after the patch. A standard repository has no
+ * manifest and no reliable way to run at all - the evidence there is a
+ * syntax check, and the verdict says so plainly rather than borrowing the
+ * word VERIFIED it did not earn.
  */
 export default function RequestedChangePanel({ view }: Props) {
   return (
@@ -55,7 +61,9 @@ export default function RequestedChangePanel({ view }: Props) {
       <div className="card-head">
         <h2 className="card-title">Requested change</h2>
         <span className="card-note">
-          instruction → patch proposed → code validates → sandbox verifies with real requests
+          {view.standard
+            ? 'instruction → source read → patch proposed → code validates → syntax-checked in a disposable copy'
+            : 'instruction → patch proposed → code validates → sandbox verifies with real requests'}
         </span>
         <div className="spacer" />
         {view.rejected
@@ -68,6 +76,32 @@ export default function RequestedChangePanel({ view }: Props) {
       </div>
 
       <blockquote className="intent-quote">{view.instruction || view.goal}</blockquote>
+
+      {view.standard && (
+        <div className="repo-meta" style={{ marginBottom: 14 }}>
+          <div className="repo-meta-row">
+            <span className="k">CONTRACT</span>
+            <span className="v">
+              standard repository — no causeway.json, no controlled experiment
+            </span>
+          </div>
+          <div className="repo-meta-row">
+            <span className="k">DETECTED</span>
+            <span className="v">
+              {view.standard.language} · {view.standard.allPythonFiles} .py file(s) found
+              {view.standard.entrypoint ? ` · likely entrypoint ${view.standard.entrypoint}` : ''}
+            </span>
+          </div>
+          <div className="repo-meta-row">
+            <span className="k">READ</span>
+            <span className="v mono">{view.standard.filesSelected.join(', ')}</span>
+          </div>
+          <div className="repo-meta-row">
+            <span className="k">TESTS</span>
+            <span className="v">{view.standard.testsNote}</span>
+          </div>
+        </div>
+      )}
 
       {view.rejected && (
         <div className="notice repo-rejected">
@@ -140,12 +174,27 @@ export default function RequestedChangePanel({ view }: Props) {
         </div>
       )}
 
+      {view.syntaxChecks && view.syntaxChecks.length > 0 && (
+        <div className="probe-group" style={{ marginTop: 14 }}>
+          <div className="constraint-title">SYNTAX CHECK — disposable, patched copy</div>
+          {view.syntaxChecks.map((item, index) => (
+            <div key={index} className={`probe-case ${item.passed ? 'pass' : 'fail'}`}>
+              <span className={`probe-dot ${item.passed ? 'pass' : 'fail'}`} aria-hidden="true" />
+              <span className="mono probe-request">{item.file}</span>
+              <span className="spacer" />
+              <span className="mono probe-status">{item.detail}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {view.reason && <div className="verdict-reason">{view.reason}</div>}
 
       {view.verdict && (
         <div className="notice sandbox-notice">
-          Verified in sandbox only — human review required. Nothing has been deployed,
-          and no production system has been changed.
+          {view.verdict === 'IMPLEMENTED_VERIFICATION_INCOMPLETE'
+            ? 'Applied to a disposable copy only — human review required. Runtime behaviour was not verified, and nothing has been deployed.'
+            : 'Verified in sandbox only — human review required. Nothing has been deployed, and no production system has been changed.'}
         </div>
       )}
     </section>

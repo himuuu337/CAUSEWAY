@@ -53,6 +53,16 @@ export default function RepositoryPanel({ view }: Props) {
               {view.owner && view.name ? `${view.owner}/${view.name}` : '—'}
             </span>
           </div>
+          {view.contract === 'standard' && (
+            <div className="repo-meta-row">
+              <span className="k">CONTRACT</span>
+              <span className="v">
+                standard repository (no causeway.json) — read and analysed directly,
+                no controlled causal experiment
+                {view.allPythonFiles !== undefined ? ` · ${view.allPythonFiles} .py file(s) found` : ''}
+              </span>
+            </div>
+          )}
           {view.commitSha && (
             <div className="repo-meta-row">
               <span className="k">COMMIT</span>
@@ -103,7 +113,7 @@ export default function RepositoryPanel({ view }: Props) {
               </span>
             </div>
           )}
-          {view.status === 'loaded' && (
+          {view.status === 'loaded' && view.contract !== 'standard' && (
             <div className="repo-meta-row">
               <span className="k good">&#10003;</span>
               <span className="v good">
