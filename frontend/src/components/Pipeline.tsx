@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, memo } from 'react'
 import type { PipelineStage } from '../useInvestigation'
 
 interface Props { stages: PipelineStage[] }
@@ -9,7 +9,7 @@ interface Props { stages: PipelineStage[] }
  * reported - a deterministic run is never called a fallback, and nothing is
  * ever called Gemini unless the backend said so.
  */
-export default function Pipeline({ stages }: Props) {
+function Pipeline({ stages }: Props) {
   return (
     <section className="card">
       <div className="card-head">
@@ -17,7 +17,7 @@ export default function Pipeline({ stages }: Props) {
         <span className="card-note">where the model is allowed to sit</span>
       </div>
 
-      <div className="pipeline">
+      <div className="pipeline" aria-live="polite">
         {stages.map((stage, index) => (
           <Fragment key={stage.key}>
             {index > 0 && <div className="pipe-arrow">&rarr;</div>}
@@ -41,3 +41,5 @@ export default function Pipeline({ stages }: Props) {
     </section>
   )
 }
+
+export default memo(Pipeline)
