@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, memo } from 'react'
 import type { HypothesisView, PhaseRow } from '../useInvestigation'
 import type { Candidate } from '../types'
 import { ms, share, times } from '../format'
@@ -49,7 +49,7 @@ function rowOf(view: HypothesisView, phase: string): PhaseRow | undefined {
  * largest of the three measurements. Every number, every state word and the
  * verdict itself arrived from the backend.
  */
-export default function ExperimentPanel({ view, candidate, active }: Props) {
+function ExperimentPanel({ view, candidate, active }: Props) {
   if (!view.started) return null
 
   const rows = EVIDENCE.map((phase) => rowOf(view, phase))
@@ -67,11 +67,13 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
           {candidate && <div className="exp-branch">{candidate.branch}</div>}
         </div>
         <div className="spacer" />
-        {view.verdict
-          ? <span className={`verdict-pill ${view.verdict}`}>{view.verdict}</span>
-          : <span className="verdict-pill waiting">
-              {active ? 'MEASURING…' : 'AWAITING MEASUREMENT'}
-            </span>}
+        <span aria-live="polite">
+          {view.verdict
+            ? <span className={`verdict-pill verdict-pill-arrive ${view.verdict}`}>{view.verdict}</span>
+            : <span className="verdict-pill waiting">
+                {active ? 'MEASURING…' : 'AWAITING MEASUREMENT'}
+              </span>}
+        </span>
       </div>
 
       <div className="stages">
@@ -127,11 +129,13 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
         </div>
         <div className="summary-verdict">
           <span className="label">VERDICT</span>
-          {view.verdict
-            ? <span className={`verdict-pill large ${view.verdict}`}>
-                {view.id} {view.verdict}
-              </span>
-            : <span className="verdict-pill large waiting">PENDING</span>}
+          <span aria-live="polite">
+            {view.verdict
+              ? <span className={`verdict-pill large verdict-pill-arrive ${view.verdict}`}>
+                  {view.id} {view.verdict}
+                </span>
+              : <span className="verdict-pill large waiting">PENDING</span>}
+          </span>
         </div>
       </div>
 
@@ -166,3 +170,5 @@ export default function ExperimentPanel({ view, candidate, active }: Props) {
     </section>
   )
 }
+
+export default memo(ExperimentPanel)
