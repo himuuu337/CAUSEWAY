@@ -9,10 +9,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AppliedEdit, Assessment, Candidate, CausewayEvent, CodeHypothesis,
+  AppliedEdit, Assessment, Candidate, CausewayEvent, CodeHypothesis, CodePatch,
   DatabaseSummary, Exclusion, Fix, FixOperation, FixVerdict, Health,
-  IntentMode, IntentSpec, Intervention, Plan, Provenance, RunState,
-  Validation, Verdict, WorkloadSummary,
+  IntentMode, IntentSpec, Intervention, Plan, Provenance, RequestedChangeVerdict,
+  RunState, Validation, Verdict, VerificationCase, WorkloadSummary,
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
@@ -87,6 +87,24 @@ export interface FixView {
   blocked?: { scope: 'intent' | 'repository'; reason: string }
 }
 
+/** The requested-change loop, folded from the patch_, verification_ and
+ * requested_change_ events only. Present only when the backend actually
+ * ran this mode - never fabricated on the frontend. */
+export interface RequestedChangeView {
+  instruction: string
+  goal: string
+  filesConsidered: string[]
+  patch?: CodePatch
+  provenance?: Provenance
+  validation?: Validation
+  rejected?: string
+  applied?: { summary: string; files: string[]; diff: string; reasoningSummary: string }
+  before: VerificationCase[]
+  after: VerificationCase[]
+  verdict?: RequestedChangeVerdict
+  reason?: string
+}
+
 /** The repository lifecycle, folded from repository_* events only. `status`
  * moves forward through validating -> cloning -> loaded, or stops at
  * rejected - never both loaded and rejected at once. */
@@ -142,6 +160,7 @@ export interface InvestigationState {
   found: CodeHypothesis[]
   detectors: string[]
   fixSkipped?: { reason: string; mode: IntentMode }
+  requestedChange?: RequestedChangeView
   events: CausewayEvent[]
 }
 
@@ -469,6 +488,60 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       next.repository = {
         ...(state.repository ?? { url: '', sources: [], patchable: [] }),
         status: 'rejected', rejection: { stage: event.stage, reason: event.reason },
+      }
+      return next
+
+    case 'requested_change_start':
+      next.requestedChange = {
+        instruction: event.instruction, goal: event.goal,
+        filesConsidered: event.files_considered, before: [], after: [],
+      }
+      return next
+
+    case 'patch_plan':
+      next.requestedChange = {
+        ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        patch: event.patch, provenance: event.provenance,
+      }
+      return next
+
+    case 'patch_validation': {
+      const { checks, passed, total, accepted, reasoning_flagged } = event
+      next.requestedChange = {
+        ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        validation: { checks, passed, total, accepted, reasoning_flagged },
+      }
+      return next
+    }
+
+    case 'patch_rejected':
+      next.requestedChange = {
+        ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        rejected: event.reason,
+      }
+      return next
+
+    case 'patch_apply':
+      next.requestedChange = {
+        ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        applied: { summary: event.summary, files: event.files, diff: event.diff,
+                  reasoningSummary: event.reasoning_summary },
+      }
+      return next
+
+    case 'verification_case': {
+      const base = state.requestedChange
+        ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
+      const key = event.phase === 'before' ? 'before' : 'after'
+      next.requestedChange = { ...base, [key]: [...base[key], event] }
+      return next
+    }
+
+    case 'requested_change_verdict':
+      next.requestedChange = {
+        ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
+        before: event.before, after: event.after,
+        verdict: event.verdict, reason: event.reason,
       }
       return next
 

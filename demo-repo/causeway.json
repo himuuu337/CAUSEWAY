@@ -4,7 +4,7 @@
   "runtime": "python",
   "entrypoint": "app.py",
   "sources": ["app.py", "db.py"],
-  "patchable": ["db.py"],
+  "patchable": ["app.py", "db.py"],
   "workload": "workload.json",
   "verification": "latency_p95",
   "incident": {
@@ -13,6 +13,23 @@
     "service": "order-service",
     "symptom": "p95 latency on the order audit endpoint",
     "detected_at": "2026-08-28T14:05:00Z"
+  },
+  "probes": {
+    "order-quantity-validation": {
+      "method": "POST",
+      "path": "/orders",
+      "cases": [
+        {"name": "positive_quantity_is_accepted",
+         "body": {"order_id": 9101, "quantity": 3},
+         "expect_status": [200, 201]},
+        {"name": "zero_quantity_is_rejected",
+         "body": {"order_id": 9102, "quantity": 0},
+         "expect_status": [400]},
+        {"name": "negative_quantity_is_rejected",
+         "body": {"order_id": 9103, "quantity": -5},
+         "expect_status": [400]}
+      ]
+    }
   },
   "database": {
     "engine": "sqlite",

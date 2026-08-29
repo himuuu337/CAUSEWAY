@@ -44,3 +44,13 @@ def audit_page(conn: sqlite3.Connection, order_ids) -> list:
 def _status_code_for(order_id: int) -> str:
     codes = ("CREATED", "PRICED", "RESERVED", "PACKED", "SHIPPED", "SETTLED")
     return codes[order_id % len(codes)]
+
+
+def insert_order(conn: sqlite3.Connection, order_id: int, quantity: int) -> int:
+    """Record a new order. The caller decides what quantity is acceptable -
+    this just writes what it is given."""
+    cursor = conn.execute(
+        "INSERT INTO orders (order_id, quantity, created_at) VALUES (?, ?, ?)",
+        (order_id, quantity, "2026-08-29T00:00:00Z"))
+    conn.commit()
+    return cursor.lastrowid

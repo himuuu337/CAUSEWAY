@@ -168,6 +168,44 @@ export interface Fix {
   reasoning_summary: string
 }
 
+/** A structured code patch: a small, bounded set of file+hunk edits, as
+ * proposed by a requested-change planner. Replaces the single-target
+ * FixOperation shape on this path - a requested change is not a repair for
+ * an already-proven cause, so there is no single known-safe answer to check
+ * a proposal against. */
+export interface PatchHunk {
+  before: string
+  after: string
+}
+
+export interface PatchFile {
+  path: string
+  hunks: PatchHunk[]
+}
+
+export interface CodePatch {
+  summary: string
+  files: PatchFile[]
+  reasoning_summary: string
+}
+
+/** One real HTTP request, sent against a disposable sandbox to check
+ * whether a requested change actually did what was asked. */
+export interface VerificationCase {
+  phase: 'before' | 'after'
+  probe: string
+  case: string
+  method: string
+  path: string
+  body: Record<string, unknown> | null
+  status: number | null
+  expected_status: number[]
+  passed: boolean
+  error: string | null
+}
+
+export type RequestedChangeVerdict = 'VERIFIED' | 'FAILED' | 'UNRESOLVED'
+
 export type CausewayEvent =
   | { type: 'stage'; stage: string; status: 'running' | 'done'; t: number }
   | {
@@ -276,6 +314,14 @@ export type CausewayEvent =
       workload: WorkloadSummary
     }
   | { type: 'repository_rejected'; stage: string; reason: string }
+  | { type: 'requested_change_start'; instruction: string; goal: string; files_considered: string[] }
+  | ({ type: 'patch_plan'; patch: CodePatch; provenance: Provenance })
+  | ({ type: 'patch_validation' } & Validation)
+  | { type: 'patch_rejected'; reason: string }
+  | { type: 'patch_apply'; summary: string; files: string[]; diff: string; reasoning_summary: string; applied_to: string }
+  | { type: 'verification_start'; cases: { probe: string; method: string; path: string; cases: string[] }[] }
+  | ({ type: 'verification_case' } & VerificationCase)
+  | { type: 'requested_change_verdict'; verdict: RequestedChangeVerdict; reason: string; before: VerificationCase[]; after: VerificationCase[] }
   | { type: 'done'; elapsed_s: number }
   | { type: 'error'; message: string }
   | { type: 'end'; run_id: string; state: RunState; error: string; event_count: number; elapsed_s: number }

@@ -449,6 +449,23 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
   font: 11px/1.5 var(--mono); letter-spacing: 0.02em;
 }
 
+/* ------------------------------------------------------- requested change */
+
+.probe-section {
+  margin-top: 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+}
+@media (max-width: 1000px) { .probe-section { grid-template-columns: 1fr; } }
+.probe-group { border-top: 1px solid var(--line); padding-top: 12px; }
+.probe-case {
+  display: flex; align-items: center; gap: 10px; font-size: 12.5px;
+  padding: 5px 0; flex-wrap: wrap;
+}
+.probe-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.probe-dot.pass { background: var(--green); }
+.probe-dot.fail { background: var(--red); }
+.probe-request { color: var(--text); }
+.probe-status { color: var(--text-dim); font-size: 12px; }
+
 /* ------------------------------------------------------------------- roadmap */
 
 .roadmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }

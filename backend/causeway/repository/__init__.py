@@ -83,6 +83,7 @@ class RepositoryContext:
     incident: Mapping[str, Any]
     workload: Mapping[str, Any]
     hypotheses: Tuple[CodeHypothesis, ...]
+    probes: Mapping[str, Any]             # {} when the repository declares none
     database_path: str                    # the repository's OWN database
     work_db: str
     database_info: Mapping[str, Any]
@@ -142,12 +143,19 @@ def load(cloned: ClonedRepo, ref: RepoRef) -> RepositoryContext:
 
     hypotheses = tuple(detectors.scan_repository(
         cloned.path, spec.schema_relative, spec.sources))
-    if not hypotheses:
+    # A repository must offer Causeway SOMETHING to work with: either a
+    # testable hypothesis for a diagnosis, or a declared probe an
+    # instruction-driven change can be verified against. Neither is required
+    # of both at once - a repository can ship only one and still be a real
+    # investigation target for the mode it supports.
+    if not hypotheses and not spec.probes:
         raise RepositoryRejected(
             "analysis",
-            "no testable hypothesis was found in %s. Causeway's prototype "
-            "detects a narrow set of patterns; this repository does not "
-            "contain one it can experiment on." % ", ".join(spec.sources))
+            "no testable hypothesis was found in %s, and the manifest "
+            "declares no verification probes. Causeway's prototype detects a "
+            "narrow set of patterns; this repository does not contain "
+            "anything it can experiment on or verify a change against."
+            % ", ".join(spec.sources))
 
     return RepositoryContext(
         owner=ref.owner, name=ref.name, url=ref.url, commit_sha=cloned.commit_sha,
@@ -155,7 +163,7 @@ def load(cloned: ClonedRepo, ref: RepoRef) -> RepositoryContext:
         verification=spec.verification, entrypoint=spec.entrypoint,
         entrypoint_path=spec.entrypoint_path, sources=spec.sources,
         patchable=spec.patchable, incident=spec.incident, workload=workload,
-        hypotheses=hypotheses, database_path=info["path"],
+        hypotheses=hypotheses, probes=spec.probes, database_path=info["path"],
         work_db=os.path.join(data_dir, "work.db"), database_info=info,
         cloned=cloned,
     )

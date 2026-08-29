@@ -55,6 +55,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"summaries": page})
         return self._json(404, {"error": "not found"})
 
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/orders":
+            length = int(self.headers.get("Content-Length") or 0)
+            raw = self.rfile.read(length) if length else b""
+            try:
+                body = json.loads(raw) if raw else {}
+            except ValueError:
+                return self._json(400, {"error": "malformed JSON body"})
+            if not isinstance(body, dict):
+                return self._json(400, {"error": "body must be a JSON object"})
+            order_id, quantity = body.get("order_id"), body.get("quantity")
+            if not isinstance(order_id, int) or isinstance(order_id, bool):
+                return self._json(400, {"error": "order_id must be an integer"})
+            if not isinstance(quantity, int) or isinstance(quantity, bool):
+                return self._json(400, {"error": "quantity must be an integer"})
+            conn = db.connect(DB_PATH)
+            try:
+                new_id = db.insert_order(conn, order_id, quantity)
+            finally:
+                conn.close()
+            return self._json(201, {"id": new_id, "order_id": order_id,
+                                    "quantity": quantity})
+        return self._json(404, {"error": "not found"})
+
 
 def main():
     global DB_PATH

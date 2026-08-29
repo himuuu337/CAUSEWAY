@@ -19,4 +19,14 @@ CREATE TABLE status_label (
     code  TEXT PRIMARY KEY,
     label TEXT NOT NULL
 );
-CREATE INDEX idx_status_code ON status_label(code)
+CREATE INDEX idx_status_code ON status_label(code);
+
+-- Orders placed through POST /orders. Empty until the service writes to it -
+-- there is no seed for this table.
+DROP TABLE IF EXISTS orders;
+CREATE TABLE orders (
+    id         INTEGER PRIMARY KEY,
+    order_id   INTEGER NOT NULL,
+    quantity   INTEGER NOT NULL,
+    created_at TEXT    NOT NULL
+)

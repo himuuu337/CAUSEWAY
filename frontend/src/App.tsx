@@ -25,6 +25,7 @@ import ExperimentPanel from './components/ExperimentPanel'
 import Conclusion from './components/Conclusion'
 import RepositoryConclusion from './components/RepositoryConclusion'
 import FixPanel from './components/FixPanel'
+import RequestedChangePanel from './components/RequestedChangePanel'
 import Roadmap from './components/Roadmap'
 import EventFeed from './components/EventFeed'
 import type { HypothesisView } from './useInvestigation'
@@ -54,6 +55,7 @@ export default function App() {
   // Which run this is, decided by what the backend emitted - never by what
   // was typed into the form.
   const isRepositoryRun = state.repository !== undefined
+  const isRequestedChangeRun = state.requestedChange !== undefined
 
   const buttonLabel = starting
     ? 'STARTING…'
@@ -170,60 +172,66 @@ export default function App() {
 
       <Pipeline stages={pipeline} />
 
-      {isRepositoryRun ? (
-        <HypothesisPanel
-          hypotheses={state.found}
-          detectors={state.detectors}
-          sources={state.repository?.sources ?? []}
-        />
+      {isRequestedChangeRun ? (
+        <RequestedChangePanel view={state.requestedChange!} />
       ) : (
-        <Candidates
-          candidates={state.candidates}
-          excluded={state.excluded}
-          assessments={state.assessments}
-          topSuspect={state.topSuspect}
-          deploysConsidered={state.deploysConsidered}
-        />
-      )}
-
-      <PlanPanel views={views} />
-
-      {views.some((view) => view.started) && (
-        <h2 className="section-title">Controlled experiments</h2>
-      )}
-      {views.map((view) => (
-        <ExperimentPanel
-          key={view.id}
-          view={view}
-          candidate={state.candidates.find((c) => c.change_id === view.id)}
-          active={state.activeHypothesis === view.id}
-        />
-      ))}
-
-      {state.conclusion && (
-        isRepositoryRun
-          ? <RepositoryConclusion
-              conclusion={state.conclusion}
-              found={state.found}
-              fixSkipped={state.fixSkipped}
+        <>
+          {isRepositoryRun ? (
+            <HypothesisPanel
+              hypotheses={state.found}
+              detectors={state.detectors}
+              sources={state.repository?.sources ?? []}
             />
-          : <Conclusion
-              conclusion={state.conclusion}
-              assessments={state.assessments}
+          ) : (
+            <Candidates
               candidates={state.candidates}
+              excluded={state.excluded}
+              assessments={state.assessments}
+              topSuspect={state.topSuspect}
+              deploysConsidered={state.deploysConsidered}
             />
-      )}
+          )}
 
-      {state.fixOrder.length > 0 && (
-        <h2 className="section-title">Verified fix</h2>
+          <PlanPanel views={views} />
+
+          {views.some((view) => view.started) && (
+            <h2 className="section-title">Controlled experiments</h2>
+          )}
+          {views.map((view) => (
+            <ExperimentPanel
+              key={view.id}
+              view={view}
+              candidate={state.candidates.find((c) => c.change_id === view.id)}
+              active={state.activeHypothesis === view.id}
+            />
+          ))}
+
+          {state.conclusion && (
+            isRepositoryRun
+              ? <RepositoryConclusion
+                  conclusion={state.conclusion}
+                  found={state.found}
+                  fixSkipped={state.fixSkipped}
+                />
+              : <Conclusion
+                  conclusion={state.conclusion}
+                  assessments={state.assessments}
+                  candidates={state.candidates}
+                />
+          )}
+
+          {state.fixOrder.length > 0 && (
+            <h2 className="section-title">Verified fix</h2>
+          )}
+          {state.fixOrder.map((id) => (
+            <FixPanel
+              key={id}
+              view={state.fixes[id]}
+              candidate={state.candidates.find((c) => c.change_id === id)}
+            />
+          ))}
+        </>
       )}
-      {state.fixOrder.map((id) => (
-        <FixPanel
-          key={id}
-          view={state.fixes[id]}
-          candidate={state.candidates.find((c) => c.change_id === id)}
-        />
-      ))}
 
       <Roadmap />
 

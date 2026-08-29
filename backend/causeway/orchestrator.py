@@ -45,7 +45,7 @@ from typing import Iterator
 
 from causeway import (config, fix_verdict, fixer, intent as intent_module,
                       observational, planner, repo_investigation, repository,
-                      verdict)
+                      requested_change, verdict)
 from causeway.incident import deploy_record
 from causeway.localizer import localize
 from causeway.sandbox import fixapply
@@ -139,8 +139,12 @@ def _repository_investigation(repository_url, instruction, mode, reps, offline):
                 yield item
         if rejected:
             return
-        for event in repo_investigation.investigate(context, spec, reps, offline):
-            yield event
+        if spec.mode == intent_module.REQUESTED_CHANGE:
+            for event in requested_change.run(context, spec, offline):
+                yield event
+        else:
+            for event in repo_investigation.investigate(context, spec, reps, offline):
+                yield event
     finally:
         if context is not None:
             context.cleanup()

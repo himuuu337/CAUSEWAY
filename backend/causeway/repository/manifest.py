@@ -36,6 +36,14 @@ REQUIRED_TOP_LEVEL = ("version", "service", "runtime", "entrypoint", "sources",
                       "database")
 REQUIRED_INCIDENT = ("id", "title", "service", "symptom", "detected_at")
 
+# Optional. A probe describes an HTTP request shape and, for each named case,
+# the status codes that count as CORRECT behaviour - the acceptance criteria
+# for a requested change, not the code that satisfies them. That distinction
+# is what keeps this out of ANSWER_KEYS: it says what "done" looks like from
+# the outside, the same way workload.json says what traffic looks like: it
+# never names a file, a line, or a line of code to write.
+PROBE_METHODS = ("GET", "POST")
+
 # Keys that would mean the repository is telling Causeway what to conclude.
 ANSWER_KEYS = ("repair_surface", "root_cause", "deploys", "answer",
                "correct_hypothesis", "known_cause", "verdict", "fix")
@@ -57,6 +65,7 @@ class Manifest:
     seed: Tuple[Mapping[str, Any], ...]
     engine: str
     incident: Mapping[str, Any]
+    probes: Mapping[str, Any]  # {} when the repository declares none
 
 
 def _reject(reason: str):
@@ -92,6 +101,47 @@ def _string_list(workspace: str, raw: Any, field: str) -> Tuple[str, ...]:
     for entry in raw:
         _safe_relative_path(workspace, entry, "%s entry" % field)
     return tuple(raw)
+
+
+def _check_probes(raw: Any) -> Mapping[str, Any]:
+    """Validate the optional `probes` section without executing anything.
+
+    Each probe names an HTTP request shape and, per case, the status codes
+    that count as correct. This is a specification of observable behaviour -
+    like workload.json - never a hint about what code to write.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        _reject("probes must be an object of probe name -> request shape")
+    for name, probe in raw.items():
+        if not isinstance(name, str) or not name:
+            _reject("every probe needs a non-empty string name")
+        if not isinstance(probe, dict):
+            _reject("probe %r must be an object" % name)
+        method = probe.get("method")
+        if method not in PROBE_METHODS:
+            _reject("probe %r method must be one of %s" % (name, ", ".join(PROBE_METHODS)))
+        path = probe.get("path")
+        if not isinstance(path, str) or not path.startswith("/"):
+            _reject("probe %r path must be a string beginning with /" % name)
+        cases = probe.get("cases")
+        if not isinstance(cases, list) or not cases:
+            _reject("probe %r must list at least one case" % name)
+        for case in cases:
+            if not isinstance(case, dict) or not isinstance(case.get("name"), str) \
+                    or not case["name"]:
+                _reject("every case in probe %r needs a non-empty string name" % name)
+            if "body" in case and case["body"] is not None \
+                    and not isinstance(case["body"], dict):
+                _reject("case %r.%s body must be an object" % (name, case["name"]))
+            statuses = case.get("expect_status")
+            if (not isinstance(statuses, list) or not statuses
+                    or not all(isinstance(s, int) and not isinstance(s, bool)
+                              and 100 <= s <= 599 for s in statuses)):
+                _reject("case %r.%s must list expect_status as HTTP status "
+                        "codes" % (name, case["name"]))
+    return raw
 
 
 def load(workspace: str) -> Manifest:
@@ -167,6 +217,7 @@ def load(workspace: str) -> Manifest:
     with open(schema_path, "r", encoding="utf-8") as handle:
         database.check_schema(handle.read())
     database.check_seed(db["seed"])
+    probes = _check_probes(raw.get("probes"))
 
     return Manifest(
         version=version, service=raw["service"], runtime=runtime,
@@ -174,5 +225,5 @@ def load(workspace: str) -> Manifest:
         entrypoint_path=entrypoint_path, sources=sources, patchable=patchable,
         workload_path=workload_path, schema_path=schema_path,
         schema_relative=db["schema"], seed=tuple(db["seed"]), engine=engine,
-        incident=incident,
+        incident=incident, probes=probes,
     )
