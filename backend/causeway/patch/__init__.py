@@ -39,7 +39,9 @@ from causeway.sandbox.variant import SourceEdit
 __all__ = ["PatchOutcome", "plan_patch", "default_patch_provider", "edits_for",
           "unified_diff_for", "display_rejection_reason", "reason_code_for",
           "check_actionable", "message_for_reason_code", "TIMEOUT_REASON",
-          "NO_PATCH_REASON", "NEEDS_CLARIFICATION_REASON", "PATCH_SCHEMA", "CodePatch",
+          "NO_PATCH_REASON", "NEEDS_CLARIFICATION_REASON", "GEMINI_RATE_LIMIT_REASON",
+          "GEMINI_UNAVAILABLE_REASON", "GEMINI_MALFORMED_RESPONSE_REASON",
+          "PATCH_SCHEMA", "CodePatch",
           "PatchRequest", "ProviderUnavailable", "ProviderTimeout", "PatchValidationReport"]
 
 # What a dashboard may say about a patch that was never applied. Never the
@@ -58,6 +60,23 @@ NO_PATCH_REASON = (
     "AI patch generation could not produce a safe, validated patch for this "
     "repository and instruction. No repository files were changed. Retry the "
     "analysis or provide a more specific problem description.")
+# Distinct from NO_PATCH_REASON on purpose: a rate limit, an unreachable
+# provider, or a malformed response are operational problems with reaching
+# Gemini, not a verdict on the instruction - collapsing them into "try being
+# more specific" tells someone whose API key is wrong to rephrase a request
+# that was never going to work no matter how it was phrased. Still no raw
+# provider text, the same safety this module applies everywhere else.
+GEMINI_RATE_LIMIT_REASON = (
+    "Gemini is rate-limiting requests right now. No repository files were "
+    "changed. Wait a moment and retry.")
+GEMINI_UNAVAILABLE_REASON = (
+    "Gemini could not be reached to propose a patch - a configuration or "
+    "network problem, not your instruction. No repository files were "
+    "changed. Check GEMINI_API_KEY and CAUSEWAY_GEMINI_MODEL, or run "
+    "python -m causeway.cli gemini-check.")
+GEMINI_MALFORMED_RESPONSE_REASON = (
+    "Gemini's response could not be read as a patch. No repository files "
+    "were changed. This is usually transient - retry the analysis.")
 VALIDATION_REJECTED_TEMPLATE = (
     "AI proposed a change, but Causeway's deterministic safety validator "
     "rejected it (%s). No repository files were changed.")
@@ -252,6 +271,12 @@ def message_for_reason_code(code: str, outcome: PatchOutcome = None) -> str:
         return NEEDS_CLARIFICATION_REASON
     if code == GEMINI_TIMEOUT:
         return TIMEOUT_REASON
+    if code == GEMINI_RATE_LIMIT:
+        return GEMINI_RATE_LIMIT_REASON
+    if code == GEMINI_HTTP_ERROR:
+        return GEMINI_UNAVAILABLE_REASON
+    if code in (GEMINI_INVALID_RESPONSE, GEMINI_INVALID_JSON):
+        return GEMINI_MALFORMED_RESPONSE_REASON
     if code in (PATCH_VALIDATION_REJECTED, GEMINI_SCHEMA_ERROR) and outcome is not None \
             and outcome.report.checks:
         names = "; ".join(c.name for c in outcome.report.rejections) or "validation failed"
