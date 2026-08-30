@@ -33,6 +33,7 @@ from typing import Iterator
 
 from causeway import intent as intent_module
 from causeway import patch as patcher
+from causeway.languages import python_runtime
 from causeway.languages.registry import adapter_for
 from causeway.sandbox.variant import materialise
 
@@ -116,6 +117,26 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
            "entrypoint": context.entrypoint or None,
            "tests_detected": context.tests_detected, "tests_note": context.tests_note}
 
+    # ---- 0. real runtime evidence, when there is an unambiguous target to run
+    #
+    # Read-only and real: a fresh disposable copy, run once, thrown away
+    # immediately. Attempted even in diagnose_only mode - that mode's whole
+    # point is "tell me what is wrong, change nothing", and this is exactly
+    # that kind of fact. Python only; every other language's verification is
+    # unchanged. See causeway/languages/python_runtime.py for what this can
+    # and cannot prove.
+    selected_entrypoint = python_runtime.select_entrypoint(
+        context.entrypoint, context.sources, context.primary_language)
+    before_observation = None
+    if selected_entrypoint:
+        before_variant = materialise(context.workspace, selected_entrypoint, edits=())
+        try:
+            before_observation = python_runtime.observe(before_variant.root, selected_entrypoint)
+        finally:
+            before_variant.cleanup()
+        yield dict({"type": "runtime_observed", "phase": "before"},
+                  **before_observation.as_dict())
+
     if intent.mode == intent_module.DIAGNOSE_ONLY:
         yield {"type": "patch_rejected",
                "reason": ("the instruction asked for diagnosis only, so no patch was "
@@ -131,6 +152,8 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
         service=context.name, entrypoint=context.entrypoint or "",
         sources=context.sources, patchable=context.patchable,
         file_contents=file_contents, acceptance={},
+        runtime_evidence=(python_runtime.summarise_for_prompt(before_observation)
+                          if before_observation is not None else ""),
     )
 
     guard = patcher.check_actionable(request)
@@ -182,6 +205,7 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
     yield _stage("verification", "running")
     variant = None
     any_failed, notes, unchecked = False, [], []
+    after_observation = None
     try:
         variant = materialise(context.workspace, None, edits=patcher.edits_for(patch))
         touched = [f.path for f in patch.files]
@@ -190,10 +214,18 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
                 any_failed, notes, unchecked = item
             else:
                 yield item
+        if selected_entrypoint:
+            after_observation = python_runtime.observe(variant.root, selected_entrypoint)
+            yield dict({"type": "runtime_observed", "phase": "after"},
+                      **after_observation.as_dict())
     finally:
         if variant is not None:
             variant.cleanup()
     yield _stage("verification", "done")
+
+    runtime_exception_resolved = (
+        python_runtime.compare(before_observation, after_observation)
+        if before_observation is not None and after_observation is not None else None)
 
     if any_failed:
         verdict = "FAILED"
@@ -212,11 +244,24 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
             pieces.append("no check was available for: %s" % ", ".join(sorted(unchecked)))
         pieces.append(
             "this repository has no causeway.json, so there is no controlled workload "
-            "and no reliable way to start or run it - Causeway does not install a "
-            "repository's dependencies or execute untrusted code automatically, so "
-            "runtime behaviour was not verified. %s" % context.tests_note)
+            "and no reliable way to fully run it - Causeway does not install a "
+            "repository's dependencies or execute untrusted code automatically. %s"
+            % context.tests_note)
         reason = ". ".join(p for p in pieces if p)
 
+        if runtime_exception_resolved is True:
+            reason += (". runtime evidence: the %s observed before the patch (%s) no "
+                      "longer occurs after it"
+                      % (before_observation.traceback.exception_type,
+                         ("%s:%s" % (before_observation.traceback.file,
+                                    before_observation.traceback.line))
+                         if before_observation.traceback.frame_available
+                         else "exact source location unavailable"))
+        elif runtime_exception_resolved is False:
+            reason += (". runtime evidence: the script still raises %s after the patch"
+                      % after_observation.traceback.exception_type)
+
     yield {"type": "requested_change_verdict", "verdict": verdict, "reason": reason,
-           "before": [], "after": []}
+           "before": [], "after": [],
+           "runtime_exception_resolved": runtime_exception_resolved}
     yield {"type": "done", "elapsed_s": round(time.time() - started, 1)}

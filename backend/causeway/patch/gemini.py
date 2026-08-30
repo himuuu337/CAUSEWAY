@@ -58,6 +58,9 @@ SYSTEM_INSTRUCTION = (
     "ask for.\n"
     "Do not claim or predict whether the change will be VERIFIED or FAILED - "
     "a sandbox will apply it to a disposable copy and real requests decide.\n"
+    "When OBSERVED RUNTIME BEHAVIOUR is present below, treat it as ground truth "
+    "about what actually happened when this entrypoint was run once - but not as "
+    "proof your fix is complete, since it exercised one code path only.\n"
     "Output must conform to the supplied CodePatch schema."
 )
 
@@ -126,6 +129,12 @@ def build_prompt(request: PatchRequest) -> str:
         "",
         "SERVICE: %s (runtime: python, entrypoint %s)" % (request.service, request.entrypoint),
     ]
+
+    if request.runtime_evidence:
+        lines += ["", "OBSERVED RUNTIME BEHAVIOUR (real, captured evidence from actually "
+                 "running this entrypoint in a disposable, timeout-bounded subprocess - "
+                 "not your inference, and not a guarantee about any input other than "
+                 "what was actually run):", request.runtime_evidence]
 
     enforced = request.intent.get("enforced") or ()
     if enforced:

@@ -132,3 +132,9 @@ class PatchRequest:
     patchable: Tuple[str, ...]             # writable
     file_contents: Mapping[str, str]       # patchable path -> bounded current text
     acceptance: Mapping[str, Any]          # the manifest's own declared probes
+    # Real, captured evidence from actually running the entrypoint once in a
+    # disposable, timeout-bounded subprocess (causeway.languages.
+    # python_runtime) - "" when none was attempted (a non-Python repository,
+    # an ambiguous entrypoint, or nothing selected to run). Optional so every
+    # existing construction site keeps compiling unchanged.
+    runtime_evidence: str = ""
