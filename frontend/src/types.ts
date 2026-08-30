@@ -429,6 +429,25 @@ export interface RiskAssessment {
   confirmed: boolean
 }
 
+/** The product's own five states, derived only from a RiskAssessment's own
+ * `level`/`confirmed` - never a new judgement. See
+ * causeway/prediction/rollup.py, which this is the exact mirror of. */
+export type PredictionState = 'STABLE' | 'WATCH' | 'ELEVATED' | 'HIGH_RISK' | 'INSUFFICIENT_DATA'
+
+export interface ServiceRisk {
+  service: string
+  state: PredictionState
+  score: number                    // 0-100
+  assessments: RiskAssessment[]
+}
+
+export interface SystemRisk {
+  state: PredictionState
+  score: number                    // 0-100
+  services_degraded: number
+  services: ServiceRisk[]
+}
+
 export type IncidentStatus =
   | 'AWAITING_REPOSITORY_CONTEXT' | 'INVESTIGATION_STARTED'
   | 'INVESTIGATION_ALREADY_RUNNING' | 'REGISTRATION_REJECTED'

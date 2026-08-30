@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { MonitorState } from '../useMonitor'
 import type { RiskLevel } from '../types'
 import { ms } from '../format'
+import SystemRiskPanel from './SystemRiskPanel'
 
 interface Props {
   monitor: MonitorState
@@ -87,6 +88,10 @@ export default function MonitorPanel({ monitor, onConnect, onOpenInvestigation }
             then run: python -m causeway.cli telemetry-demo
           </span>
         </div>
+      )}
+
+      {monitor.connection === 'open' && (
+        <SystemRiskPanel monitor={monitor} selectedService={primaryService} onSelectService={setService} />
       )}
 
       <div className="repo-input-row" style={{ marginTop: 14 }}>
