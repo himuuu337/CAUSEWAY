@@ -874,6 +874,32 @@ follow, the engine confirms `connection_pool_exhaustion`, an incident opens,
 and — if the service was registered against a repository — an investigation
 starts on its own.
 
+### Monitoring a real repository instead of the bundled demo
+
+`python -m causeway.cli monitor-repository --repository-url
+https://github.com/<owner>/<repo> --service <name>` does the same thing
+`telemetry-demo` does — real requests, real measured latency and error rate,
+posted to `/api/telemetry` on a loop — for a repository *you* provide, instead
+of the bundled fixture. `causeway/repository_monitor.py` reuses the same
+pieces a manual investigation already uses: `causeway.repository.acquire` to
+clone and load it, `causeway.sandbox.runner.Sandbox` to launch its own
+entrypoint against its own database (the identical primitive the causal
+experiment already runs that repository under), and
+`causeway.sandbox.replay.replay` to send its own declared workload and
+measure what actually comes back. Nothing here is a new trust boundary: every
+repository this can target is already executed by the causal-experiment path
+today; this just runs it continuously instead of in seven short measured
+phases, so a real, sustained trend has something to move through.
+
+This only works for a repository that declares `causeway.json` — the same
+entrypoint/workload/database contract the causal experiment already needs.
+There is no reliable way to start or load a manifest-less repository, so one
+is refused with a clear reason rather than guessed at, the same honesty
+`standard_investigation.py` already applies. Link `--service` to the same
+repository with `POST /api/services/register` (or the Prediction panel's own
+form) so a confirmed risk hands off into a real investigation of it, exactly
+as the bundled demo already does.
+
 ### What this is not
 
 This is a hackathon prototype, not a guarantee of predicting every production

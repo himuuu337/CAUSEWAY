@@ -656,6 +656,77 @@ def cmd_telemetry_demo(args) -> int:
     return 0
 
 
+# --------------------------------------------------- monitor a repository
+
+def cmd_monitor_repository(args) -> int:
+    """Clones a real, user-provided causeway.json repository, runs its own
+    entrypoint against its own database, drives its own declared workload,
+    and posts what actually happened to Causeway's /api/telemetry - the
+    same real-measurement discipline telemetry-demo applies to the bundled
+    demo-repo-pool, for a repository the user names instead. Refuses
+    plainly, before cloning finishes anything, for a repository with no
+    causeway.json - there is no declared workload or entrypoint to run one
+    against, the same reason causeway.cli investigate's standard path never
+    executes a manifest-less repository either. Requires
+    `python -m causeway.api` already running and reachable at
+    --causeway-url, and (separately) `POST /api/services/register` -  or
+    the Prediction panel's own "LINK REPOSITORY" form - to link --service to
+    this same repository, if a confirmed risk should hand off into a real
+    investigation of it."""
+    from causeway import repository_monitor
+
+    style = Style(enabled=not args.no_color)
+    print("Causeway - live repository monitor")
+    _rule()
+    print("  repository: %s" % args.repository_url)
+    print("  service:    %s" % args.service)
+    print("  reporting real telemetry to %s every %.0fs"
+          % (args.causeway_url, repository_monitor.TELEMETRY_INTERVAL_SECONDS))
+    print("  this is a best-effort subprocess sandbox, not OS-level isolation -")
+    print("  only run it against a repository you trust")
+    print("  Ctrl-C to stop")
+    print()
+
+    started_at = time.time()
+
+    def on_event(event):
+        etype = event.get("type")
+        if etype == "repository_validating":
+            print("  validating %s ..." % event.get("url"))
+        elif etype == "repository_cloning":
+            print("  cloning %s/%s ..." % (event.get("owner"), event.get("name")))
+        elif etype == "repository_loaded":
+            print("  loaded: entrypoint=%s" % event.get("entrypoint"))
+        elif etype == "repository_rejected":
+            print(style.red("  rejected at %s: %s" % (event.get("stage"), event.get("reason"))))
+
+    def on_sample(sample, posted):
+        used, capacity = sample.get("db_pool_used"), sample.get("db_pool_capacity")
+        utilisation = (used / capacity * 100.0) if used is not None and capacity else None
+        line = ("  t+%6.1fs  req/s=%5.1f  p95=%7.1fms  err=%5.1f%%"
+               % (time.time() - started_at, sample.get("request_rate", 0.0),
+                  sample.get("p95_ms", 0.0), sample.get("error_rate", 0.0) * 100.0))
+        if utilisation is not None:
+            line += ("  pool=%5.1f%%  waiting=%3d"
+                    % (utilisation, sample.get("db_waiting_requests", 0)))
+        line += "  " + (style.green("posted") if posted
+                        else style.red("POST FAILED - is `python -m causeway.api` running?"))
+        print(line)
+
+    try:
+        repository_monitor.run(
+            repository_url=args.repository_url, service_name=args.service,
+            instruction=args.instruction or "", causeway_url=args.causeway_url,
+            duration_seconds=args.duration, on_sample=on_sample, on_event=on_event)
+    except KeyboardInterrupt:
+        print()
+        print("  stopped")
+    except RuntimeError as exc:
+        print(style.red("  %s" % exc), file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="causeway")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -697,10 +768,35 @@ def main(argv=None) -> int:
                       help="seconds to run before stopping automatically "
                           "(default: run until Ctrl-C)")
 
+    monitor = sub.add_parser(
+        "monitor-repository",
+        help="clone a causeway.json repository, run its own entrypoint against its "
+            "own database, and report real telemetry to a running Causeway backend")
+    monitor.add_argument("--no-color", action="store_true")
+    monitor.add_argument("--causeway-url", default="http://127.0.0.1:8000",
+                         help="where python -m causeway.api is listening")
+    monitor.add_argument("--repository-url", required=True,
+                         help="https://github.com/<owner>/<repo> - must declare "
+                             "causeway.json (an entrypoint, a workload, a database "
+                             "built from its own schema)")
+    monitor.add_argument("--service", required=True,
+                         help="the service name to post telemetry under - link it to "
+                             "this repository with POST /api/services/register (or "
+                             "the Prediction panel's own form) for a confirmed risk "
+                             "to hand off into a real investigation")
+    monitor.add_argument("--instruction", default=None,
+                         help="carried into causeway.intent the same way a manual "
+                             "investigation's instruction is - optional, this path "
+                             "never proposes a fix")
+    monitor.add_argument("--duration", type=float, default=None,
+                         help="seconds to run before stopping automatically "
+                             "(default: run until Ctrl-C)")
+
     args = parser.parse_args(argv)
     return {"seed": cmd_seed, "investigate": cmd_investigate,
             "events": cmd_events, "gemini-check": cmd_gemini_check,
-            "telemetry-demo": cmd_telemetry_demo}[args.command](args)
+            "telemetry-demo": cmd_telemetry_demo,
+            "monitor-repository": cmd_monitor_repository}[args.command](args)
 
 
 if __name__ == "__main__":
