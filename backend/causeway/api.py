@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from causeway import config, intent, monitor, production, stream, verdict
+from causeway.graph import build_graph
 from causeway.incident import INCIDENT
 from causeway.incidents import manager as incident_manager
 from causeway.prediction.engine import engine as prediction_engine
@@ -236,6 +237,19 @@ def all_events(run_id: str) -> dict:
     if run is None:
         raise HTTPException(status_code=404, detail="no such investigation")
     return {**run.summary(), "events": manager.events_from(run_id, 0)}
+
+
+@app.get("/api/investigation/{run_id}/graph")
+def investigation_graph(run_id: str) -> dict:
+    """The causal graph, built deterministically from this run's own event
+    buffer - see causeway/graph.py. Nothing is computed here beyond finding
+    the run and its confirmed-incident linkage; build_graph decides nothing
+    causeway.verdict did not already decide."""
+    run = manager.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no such investigation")
+    events = manager.events_from(run_id, 0)
+    return build_graph(events, incidents=incident_manager.all(), run_id=run_id)
 
 
 @app.get("/api/investigation/stream")

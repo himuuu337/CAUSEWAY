@@ -122,6 +122,39 @@ class ConflictTests(unittest.TestCase):
 
 
 @unittest.skipIf(api is None, SKIP)
+class GraphEndpointTests(unittest.TestCase):
+    """GET /api/investigation/{run_id}/graph - wiring only. The graph's own
+    construction rules are covered exhaustively by tests/test_graph.py; this
+    just proves the route exists, 404s correctly, and hands build_graph the
+    right run's own events."""
+
+    def setUp(self):
+        self.original = api.manager
+        self.blocking = BlockingRun()
+        api.manager = RunManager(source=self.blocking)
+        self.run = api.manager.start()
+
+    def tearDown(self):
+        self.blocking.release()
+        api.manager.join(timeout=5)
+        api.manager = self.original
+
+    def test_the_route_is_registered(self):
+        paths = {route.path for route in api.app.routes}
+        self.assertIn("/api/investigation/{run_id}/graph", paths)
+
+    def test_an_unknown_run_id_is_a_404(self):
+        with self.assertRaises(HTTPException) as ctx:
+            api.investigation_graph("no-such-run")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_a_known_run_returns_a_graph_shaped_response(self):
+        payload = api.investigation_graph(self.run.id)
+        self.assertIn("nodes", payload)
+        self.assertIn("edges", payload)
+
+
+@unittest.skipIf(api is None, SKIP)
 class StreamingHeaderTests(unittest.TestCase):
     def test_buffering_is_disabled_on_the_stream(self):
         """A proxy that buffers text/event-stream turns a live investigation

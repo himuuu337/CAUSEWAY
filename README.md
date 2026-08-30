@@ -73,6 +73,7 @@ Python 3.10+ and Node 18+.
     cd ..\frontend
     npm install
     npm run build                        # tsc --noEmit && vite build
+    npm test                             # vitest run - graph.ts and nothing else yet
 
 Then one process, one URL - this is the demo-day path:
 
@@ -101,6 +102,7 @@ The command line still works and needs no dependencies at all:
 | `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
 | `GET /api/investigation/stream` | Server-Sent Events, resumable |
 | `GET /api/investigation/{id}/events` | the whole buffer as JSON |
+| `GET /api/investigation/{id}/graph` | the causal graph, built deterministically from that same buffer - see [The causal graph](#the-causal-graph) |
 | `POST /api/telemetry` | ingest one real telemetry sample for one service |
 | `GET /api/prediction/status` | the engine's current risk assessment(s), as last computed - optionally `?service=` |
 | `POST /api/services/register` | link a service name to the GitHub repository its incidents should hand off to |
@@ -856,6 +858,81 @@ same `validate_sample()` call is a translation layer at the edge, not a
 change to detection, hysteresis, or incident logic. That translation layer is
 out of scope for this milestone and was not built; the schema it would feed
 already exists.
+
+## The causal graph
+
+The graph has two implementations of one contract, on purpose, not two
+products: `causeway/graph.py`'s `build_graph()` on the backend, and
+`frontend/src/graph.ts`'s `buildCausalGraph()` on the frontend. Both are
+pure functions of an investigation's own event buffer (the identical
+sequence `GET /api/investigation/{run_id}/events` already returns), both
+decide nothing `causeway.verdict` did not already decide, and both produce
+the same node/edge shape — a node or an edge built by one is indistinguishable
+from one built by the other, and `GraphDrawer.tsx` renders either without
+knowing which it got.
+
+`GET /api/investigation/{run_id}/graph` is the backend's own answer, built
+server-side from that run's event buffer plus (for the one `prediction` case
+below) `causeway.incidents.manager.all()`. `CausalGraph.tsx` renders
+instantly from its own client-side `buildCausalGraph(state, monitor)` — the
+same `InvestigationState` every other panel on the page already folds from
+SSE, so the graph is live with zero network latency and is never blank — and
+then fetches the backend's version in the background, debounced on the
+event count so a burst of measurement events collapses into one request
+rather than one per event. Once that request lands the page switches to
+rendering the backend's own graph and shows a `BACKEND-VERIFIED` tag; if the
+request fails, the client-side graph keeps rendering exactly as it already
+was — `BACKEND_UNAVAILABLE` degrades silently into the live view rather than
+a blank panel. This is not polling: nothing here runs on a timer, a fetch is
+only ever triggered by the event buffer actually having grown.
+
+**Nodes**: `incident`, `repository`, `candidate` (a bundled-demo deploy),
+`code_change` (a repository hypothesis — file, line, symbol, the exact text
+found there), `experiment`, `fix`, and `prediction`. Every field on a node
+came from a field on an already-received event; none is computed or guessed
+by either implementation.
+
+**Edges, and the causal truth model**: a suspected cause is wired straight to
+the incident labelled "suspected cause" and drawn dashed. The moment its
+hypothesis starts, an `experiment` node is spliced in between them and the
+edge into the incident is relabelled from the experiment's own
+`causeway.verdict` outcome — `PROVEN` becomes "verified causal relationship"
+(solid), `REFUTED` becomes "refuted", `SUPPORTED` and `UNRESOLVED` keep their
+own words. The graph never uses causal language ahead of a verdict, and never
+upgrades one verdict's label into a stronger one. A `prediction` node appears
+only when `causeway.incidents.manager`'s own handoff already tied a risk
+episode to this run (`Incident.run_id` matching the investigation's `run_id`)
+— never inferred from two nodes merely naming the same service.
+
+**Interaction**: clicking a node opens a detail drawer built from that same
+node's `metadata` — for a `code_change` node this is genuinely the observed
+source line and the counterfactual a detector derived, never a fabricated one;
+for an `experiment` node it separates the measured phase numbers (observed),
+the planner's `reasoning_summary` (AI interpretation, explicitly labelled and
+never read by the verdict engine), and `verdict.reason()`'s own sentence
+(verified conclusion). A `fix` node's diff is labelled an AI-proposed patch,
+distinct from the repository's own code.
+
+**Tests**: `backend/tests/test_graph.py` (`python -m unittest tests.test_graph`)
+and `backend/tests/test_api.py`'s `GraphEndpointTests` cover the server-side
+builder and its route; `frontend/src/graph.test.ts` and `graphApi.test.ts`
+(`npm test` in `frontend/`) cover the client-side builder and the fetch
+wrapper. Both builder test suites assert the same set of cases: an empty
+graph, an incident with nothing else yet, a not-yet-tested candidate staying
+a candidate, the experiment splice and its per-verdict label
+(`PROVEN`/`REFUTED`), a repository code hypothesis wired through its
+repository node, a fix node attaching to its experiment, a fix node never
+appearing unproposed, and the prediction link appearing only for a matching
+`run_id` and never for an unrelated one.
+
+**Current limitations, stated plainly**: this is a graph adapter over the
+existing event stream, not a new investigation capability — it shows nothing
+the event buffer did not already carry. There is no trace or log node type
+because the backend does not emit traces or logs; only file/line source
+evidence and measured latencies exist today, so those are what the graph
+shows. Layout (`dagre`, top-to-bottom) is computed client-side only — the
+backend endpoint returns nodes and edges, not pixel positions — with no
+manual repositioning, grouping, or minimap yet.
 
 ## The bundled demonstration
 
