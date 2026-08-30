@@ -27,6 +27,7 @@ import RepositoryConclusion from './components/RepositoryConclusion'
 import FixPanel from './components/FixPanel'
 import RequestedChangePanel from './components/RequestedChangePanel'
 import MonitorPanel from './components/MonitorPanel'
+import CausalGraph from './components/CausalGraph'
 import Roadmap from './components/Roadmap'
 import EventFeed from './components/EventFeed'
 import type { HypothesisView } from './useInvestigation'
@@ -181,6 +182,7 @@ export default function App() {
             service={incidentService}
           />
           <Pipeline stages={pipeline} />
+          {state.incident && <CausalGraph state={state} monitor={monitor.state} />}
         </>
       )}
 
