@@ -1,6 +1,6 @@
 import { modelOf } from '../useInvestigation'
 import type { RequestedChangeView } from '../useInvestigation'
-import type { VerificationCase } from '../types'
+import type { RuntimeObservation, VerificationCase } from '../types'
 import { languageLabel } from '../format'
 
 interface Props {
@@ -26,6 +26,30 @@ function plannerClass(view: RequestedChangeView): string {
   if (p.used_fallback) return 'planner-tag fallback'
   if (p.kind === 'gemini') return 'planner-tag ai'
   return 'planner-tag'
+}
+
+/** A real, timeout-bounded subprocess run - Python only. Shows exactly what
+ * causeway.languages.python_runtime observed, nothing derived here. */
+function RuntimeRow({ label, obs }: { label: string; obs: RuntimeObservation }) {
+  if (!obs.attempted) return null
+  const t = obs.traceback
+  return (
+    <div className="probe-group">
+      <div className="constraint-title">{label} — {obs.entrypoint}</div>
+      <div className="small faint" style={{ marginBottom: t ? 6 : 0 }}>{obs.note}</div>
+      {t && (
+        <pre className="diff" style={{ marginTop: 0 }}>
+          <div className="diff-del">
+            {t.exception_type}{t.message ? `: ${t.message}` : ''}
+          </div>
+          <div className="diff-ctx">
+            {t.frame_available ? `${t.file}:${t.line}${t.function ? ` in ${t.function}()` : ''}`
+              : 'exact source location unavailable'}
+          </div>
+        </pre>
+      )}
+    </div>
+  )
 }
 
 function CaseRow({ item }: { item: VerificationCase }) {
@@ -211,6 +235,26 @@ export default function RequestedChangePanel({ view }: Props) {
               <span className="mono probe-status">{item.detail}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {(view.runtimeObservedBefore?.attempted || view.runtimeObservedAfter?.attempted) && (
+        <div className="probe-section" style={{ marginTop: 14 }}>
+          <div className="constraint-title" style={{ marginBottom: 0 }}>
+            RUNTIME OBSERVATION — real subprocess execution, Python only
+          </div>
+          {view.runtimeObservedBefore && <RuntimeRow label="BEFORE" obs={view.runtimeObservedBefore} />}
+          {view.runtimeObservedAfter && <RuntimeRow label="AFTER" obs={view.runtimeObservedAfter} />}
+          {view.runtimeExceptionResolved !== undefined && view.runtimeExceptionResolved !== null && (
+            <div className={`probe-case ${view.runtimeExceptionResolved ? 'pass' : 'fail'}`}>
+              <span className={`probe-dot ${view.runtimeExceptionResolved ? 'pass' : 'fail'}`} aria-hidden="true" />
+              <span className="small">
+                {view.runtimeExceptionResolved
+                  ? 'the exception observed before the patch no longer occurs'
+                  : 'the same exception still occurs after the patch'}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

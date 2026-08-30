@@ -228,6 +228,36 @@ export interface VerificationCase {
   error: string | null
 }
 
+/** A real Python exception, parsed deterministically from the interpreter's
+ * own traceback text - never guessed. `file`/`line`/`function` are null
+ * when no frame resolved inside the repository's own disposable copy. */
+export interface TracebackFinding {
+  kind: 'runtime' | 'syntax'
+  exception_type: string
+  message: string
+  file: string | null
+  line: number | null
+  function: string | null
+  frame_available: boolean
+  raw: string
+}
+
+/** One real, timeout-bounded subprocess run of a repository's Python
+ * entrypoint (causeway.languages.python_runtime) - real evidence, not a
+ * static guess. `attempted` is false when no unambiguous target existed. */
+export interface RuntimeObservation {
+  attempted: boolean
+  entrypoint: string
+  exited_cleanly: boolean
+  timed_out: boolean
+  crashed: boolean
+  traceback: TracebackFinding | null
+  stdout_tail: string
+  stderr_tail: string
+  duration_s: number
+  note: string
+}
+
 export type RequestedChangeVerdict =
   | 'VERIFIED' | 'FAILED' | 'UNRESOLVED'
   // The standard (manifest-less) path: a patch was applied to a disposable
@@ -371,13 +401,21 @@ export type CausewayEvent =
     }
   | { type: 'verification_check'; language: string; tool: string; file: string; passed: boolean; detail: string }
   | { type: 'requested_change_start'; instruction: string; goal: string; files_considered: string[] }
+  | ({ type: 'runtime_observed'; phase: 'before' | 'after' } & RuntimeObservation)
   | ({ type: 'patch_plan'; patch: CodePatch; provenance: Provenance })
   | ({ type: 'patch_validation' } & Validation)
   | { type: 'patch_rejected'; reason: string; detail?: string }
   | { type: 'patch_apply'; summary: string; files: string[]; diff: string; reasoning_summary: string; applied_to: string }
   | { type: 'verification_start'; cases: { probe: string; method: string; path: string; cases: string[] }[] }
   | ({ type: 'verification_case' } & VerificationCase)
-  | { type: 'requested_change_verdict'; verdict: RequestedChangeVerdict; reason: string; before: VerificationCase[]; after: VerificationCase[] }
+  | {
+      type: 'requested_change_verdict'
+      verdict: RequestedChangeVerdict
+      reason: string
+      before: VerificationCase[]
+      after: VerificationCase[]
+      runtime_exception_resolved?: boolean | null
+    }
   | { type: 'done'; elapsed_s: number }
   | { type: 'error'; message: string }
   | { type: 'end'; run_id: string; state: RunState; error: string; event_count: number; elapsed_s: number }

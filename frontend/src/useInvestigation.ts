@@ -12,7 +12,7 @@ import type {
   AppliedEdit, Assessment, Candidate, CausewayEvent, CodeHypothesis, CodePatch,
   DatabaseSummary, Exclusion, Fix, FixOperation, FixVerdict, Health,
   IntentMode, IntentSpec, Intervention, Plan, Provenance, RequestedChangeVerdict,
-  RunState, Validation, Verdict, VerificationCase, WorkloadSummary,
+  RunState, RuntimeObservation, Validation, Verdict, VerificationCase, WorkloadSummary,
 } from './types'
 
 export type Connection = 'closed' | 'connecting' | 'open' | 'reconnecting'
@@ -103,6 +103,16 @@ export interface RequestedChangeView {
   after: VerificationCase[]
   verdict?: RequestedChangeVerdict
   reason?: string
+  /** Real, timeout-bounded subprocess execution of the entrypoint - Python
+   * only, present only when causeway.languages.python_runtime found an
+   * unambiguous target to run. Never fabricated. */
+  runtimeObservedBefore?: RuntimeObservation
+  runtimeObservedAfter?: RuntimeObservation
+  /** true: the exception observed before the patch no longer occurs after
+   * it. false: the same exception recurred. null/undefined: nothing
+   * conclusive to compare (no crash was observed before, or execution was
+   * never attempted). */
+  runtimeExceptionResolved?: boolean | null
   /** Present only on the standard (manifest-less) path. */
   standard?: {
     primaryLanguage: string
@@ -565,6 +575,16 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
       }
       return next
 
+    case 'runtime_observed': {
+      const { type: _t, phase, ...observation } = event
+      const base = state.requestedChange
+        ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }
+      next.requestedChange = phase === 'before'
+        ? { ...base, runtimeObservedBefore: observation }
+        : { ...base, runtimeObservedAfter: observation }
+      return next
+    }
+
     case 'patch_plan':
       next.requestedChange = {
         ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
@@ -609,6 +629,7 @@ function reduce(state: InvestigationState, event: CausewayEvent): InvestigationS
         ...(state.requestedChange ?? { instruction: '', goal: '', filesConsidered: [], before: [], after: [] }),
         before: event.before, after: event.after,
         verdict: event.verdict, reason: event.reason,
+        runtimeExceptionResolved: event.runtime_exception_resolved,
       }
       return next
 
