@@ -290,13 +290,16 @@ def build_graph(events: Sequence[Mapping[str, Any]], incidents: Sequence[Any] = 
 
     for hypothesis in view["found"]:
         node_id = "code:%s" % hypothesis["id"]
+        line, line_end = hypothesis.get("line"), hypothesis.get("line_end")
+        location = ("%s-%s" % (line, line_end)) if line_end and line_end != line else str(line)
         nodes.append({
             "id": node_id, "type": "code_change", "label": hypothesis.get("label"),
-            "description": "%s:%s" % (hypothesis.get("file"), hypothesis.get("line")),
+            "description": "%s:%s" % (hypothesis.get("file"), location),
             "status": "testable" if hypothesis.get("testable") else "not testable",
             "metadata": {
                 "file": hypothesis.get("file"), "line": hypothesis.get("line"),
-                "symbol": hypothesis.get("symbol"), "kind": hypothesis.get("kind"),
+                "lineEnd": hypothesis.get("line_end"), "symbol": hypothesis.get("symbol"),
+                "kind": hypothesis.get("kind"), "category": hypothesis.get("category"),
                 "observed": hypothesis.get("observed"), "counterfactual": hypothesis.get("counterfactual"),
                 "evidence": hypothesis.get("evidence"), "reason": hypothesis.get("reason"),
                 "detector": hypothesis.get("detector"),

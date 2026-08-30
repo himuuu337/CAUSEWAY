@@ -33,7 +33,8 @@ def hypotheses_event(*ids):
             "testable": list(ids),
             "hypotheses": [
                 {"id": hid, "label": "Hypothesis %s" % hid, "file": "order_service/db.py", "line": 144,
-                 "symbol": "get_order_audit", "kind": "predicate",
+                 "line_end": 144, "symbol": "get_order_audit", "kind": "predicate",
+                 "category": "DATABASE ISSUE",
                  "observed": "WHERE normalize(order_id) = ?", "counterfactual": "WHERE order_id = ?",
                  "evidence": "predicate wraps an indexed column", "reason": "this can defeat the index",
                  "detector": "predicate-wrap", "testable": True, "context": []}
@@ -133,6 +134,13 @@ class BuildGraphTests(unittest.TestCase):
         contains = next(e for e in graph["edges"]
                         if e["source"] == "repository" and e["target"] == "code:h1")
         self.assertEqual(contains["strength"], "link")
+
+    def test_a_code_hypothesis_carries_its_engineering_insight_category(self):
+        events = [incident_event(), repository_loaded_event(), hypotheses_event("h1")]
+        graph = build_graph(events)
+        code_node = next(n for n in graph["nodes"] if n["id"] == "code:h1")
+        self.assertEqual(code_node["metadata"]["category"], "DATABASE ISSUE")
+        self.assertEqual(code_node["metadata"]["lineEnd"], 144)
 
     def test_fix_node_attaches_to_its_experiment(self):
         events = [incident_event(), candidates_event("B"), plan_event("B"),

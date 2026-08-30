@@ -15,6 +15,18 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+# A fixed engineering-insight vocabulary, assigned only by which detector
+# produced a finding - never guessed per finding, and never upgraded by
+# anything downstream (a planner's prose, a fix's summary). Widening this
+# happens by adding a detector's name here, in the same commit that adds the
+# detector; a finding from a detector this dict does not name is UNKNOWN,
+# honestly, rather than defaulted into a category nothing established.
+CATEGORY_BY_DETECTOR = {
+    "sql_predicate_index_usability": "DATABASE ISSUE",
+    "resource_release_not_guaranteed": "RESOURCE ISSUE",
+}
+UNKNOWN_CATEGORY = "UNKNOWN"
+
 
 @dataclass(frozen=True)
 class CodeHypothesis:
@@ -57,10 +69,29 @@ class CodeHypothesis:
         evidence - but it is never claimed to have been tested."""
         return bool(self.counterfactual) and self.counterfactual != self.observed
 
+    @property
+    def category(self) -> str:
+        """The engineering-insight category this finding's own detector
+        represents - a property of which detector found it, not a judgement
+        made about this particular finding. See CATEGORY_BY_DETECTOR."""
+        return CATEGORY_BY_DETECTOR.get(self.detector, UNKNOWN_CATEGORY)
+
+    @property
+    def line_end(self) -> int:
+        """The last line `observed` actually occupies, counted from `line`
+        itself - never asserted beyond what the observed text's own line
+        count supports. Equal to `line` for a single-line finding."""
+        newlines = self.observed.count("\n")
+        if newlines == 0:
+            return self.line
+        trailing = self.observed.endswith("\n")
+        return self.line + newlines - (1 if trailing else 0)
+
     def as_dict(self) -> dict:
         return {
             "id": self.id, "label": self.label, "file": self.file,
-            "line": self.line, "symbol": self.symbol, "kind": self.kind,
+            "line": self.line, "line_end": self.line_end, "symbol": self.symbol,
+            "kind": self.kind, "category": self.category,
             "observed": self.observed, "counterfactual": self.counterfactual,
             "evidence": self.evidence, "reason": self.reason,
             "detector": self.detector, "testable": self.testable,
