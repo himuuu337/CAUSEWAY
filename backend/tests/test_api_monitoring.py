@@ -75,6 +75,23 @@ class MonitoringRoutesTests(unittest.TestCase):
         names = {entry["service"] for entry in status["services"]}
         self.assertEqual(names, {"a", "b"})
 
+    def test_the_system_risk_route_is_registered(self):
+        paths = {route.path for route in api.app.routes}
+        self.assertIn("/api/prediction/system", paths)
+
+    def test_system_risk_with_no_telemetry_at_all_is_insufficient_data(self):
+        payload = api.prediction_system()
+        self.assertEqual(payload["state"], "INSUFFICIENT_DATA")
+        self.assertEqual(payload["services"], [])
+
+    def test_system_risk_rolls_up_every_known_service(self):
+        api.post_telemetry({"service": "a", "cpu_percent": 1.0})
+        api.post_telemetry({"service": "b", "cpu_percent": 1.0})
+        payload = api.prediction_system()
+        names = {entry["service"] for entry in payload["services"]}
+        self.assertEqual(names, {"a", "b"})
+        self.assertIn("services_degraded", payload)
+
     def test_registering_a_service_returns_the_target(self):
         response = api.register_service({"service": "s", "repository_url":
                                          "https://github.com/o/n"})

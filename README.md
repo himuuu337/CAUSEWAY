@@ -105,6 +105,7 @@ The command line still works and needs no dependencies at all:
 | `GET /api/investigation/{id}/graph` | the causal graph, built deterministically from that same buffer - see [The causal graph](#the-causal-graph) |
 | `POST /api/telemetry` | ingest one real telemetry sample for one service |
 | `GET /api/prediction/status` | the engine's current risk assessment(s), as last computed - optionally `?service=` |
+| `GET /api/prediction/system` | the system-wide risk rollup across every service with telemetry - see [System risk](#system-risk) |
 | `POST /api/services/register` | link a service name to the GitHub repository its incidents should hand off to |
 | `GET /api/services` | the currently registered service → repository links |
 | `GET /api/monitor/stream` | Server-Sent Events - telemetry, risk, and incident events, independent of any one investigation |
@@ -812,6 +813,43 @@ it.
 allow-list the manual investigation form uses — registering a service is not
 a lighter-weight way to point Causeway at a repository the real investigation
 path would have refused.
+
+### System risk
+
+`causeway/prediction/rollup.py` answers one further question none of the
+per-service, per-detector assessments above answer on their own: **is the
+system, as a whole, at risk right now, and how many services are degrading**.
+It is a pure aggregation over the same `RiskAssessment`s the engine already
+produced — no new detection, no new score, nothing decided here that a
+detector or the hysteresis engine had not already decided — mapped onto five
+states:
+
+| State | Meaning |
+|---|---|
+| `STABLE` | every detector's own level is `LOW` |
+| `WATCH` | a detector's own level is `MEDIUM` |
+| `ELEVATED` | a detector's own level is `HIGH`, not yet confirmed |
+| `HIGH_RISK` | a detector's own level is `HIGH`, confirmed by sustained evidence |
+| `INSUFFICIENT_DATA` | no detector has produced an assessment at all |
+
+A service with no assessments is `INSUFFICIENT_DATA`, never folded into
+`STABLE` — "nothing has said this is a problem yet" and "every detector
+looked and found nothing" are different claims, and only the second one is
+`STABLE`. The system's own state is the most severe state among every
+service it knows about; its score is the most severe service's own score,
+scaled to 0–100.
+
+Two implementations of this one rollup exist, the same way the causal graph
+has two: `frontend/src/systemRisk.ts`'s `buildSystemRisk` computes it
+instantly, client-side, from the exact `MonitorState` `MonitorPanel` already
+folds from `/api/monitor/stream` — live, with no network round trip, and
+never blank. `GET /api/prediction/system` is the backend's own answer, built
+server-side from `causeway.prediction.engine`'s live evaluation of every
+service the telemetry store has samples for. `SystemRiskPanel` renders the
+client-side rollup immediately, then fetches the backend's version in the
+background (debounced on the monitor event count, not polling) and switches
+to it once it lands, tagging the panel `BACKEND-VERIFIED`; a failed fetch
+degrades silently back to the live view.
 
 ### Watching it happen
 

@@ -31,6 +31,7 @@ from causeway.graph import build_graph
 from causeway.incident import INCIDENT
 from causeway.incidents import manager as incident_manager
 from causeway.prediction.engine import engine as prediction_engine
+from causeway.prediction.rollup import system_risk
 from causeway.runs import AlreadyRunning, manager
 from causeway.services import registry as service_registry
 from causeway.telemetry import TelemetryRejected, validate_sample
@@ -117,6 +118,15 @@ def prediction_status(service: Optional[str] = Query(None)):
     if service:
         return prediction_engine.status(service)
     return {"services": [prediction_engine.status(name) for name in telemetry_store.services()]}
+
+
+@app.get("/api/prediction/system")
+def prediction_system() -> dict:
+    """The system-wide risk rollup - see causeway/prediction/rollup.py.
+    A pure aggregation of what prediction_status already reports per
+    service; no new detection, no new score."""
+    per_service = {name: prediction_engine.evaluate(name) for name in telemetry_store.services()}
+    return system_risk(per_service).as_dict()
 
 
 @app.post("/api/services/register")
