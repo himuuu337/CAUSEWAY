@@ -39,7 +39,13 @@ export default function HypothesisPanel({ hypotheses, detectors, sources }: Prop
           <div key={hypothesis.id} className="hyp-row">
             <div className="hyp-head">
               <span className="hyp-label mono">{hypothesis.label}</span>
+              {hypothesis.line_end !== hypothesis.line && (
+                <span className="small faint">(lines {hypothesis.line}–{hypothesis.line_end})</span>
+              )}
               <div className="spacer" />
+              {hypothesis.category !== 'UNKNOWN' && (
+                <span className="hyp-category mono">{hypothesis.category}</span>
+              )}
               <span className={`hyp-flag ${hypothesis.testable ? 'ok' : 'off'}`}>
                 {hypothesis.testable ? 'TESTABLE' : 'NOT TESTABLE'}
               </span>

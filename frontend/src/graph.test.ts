@@ -57,8 +57,9 @@ function candidate(id: string): Candidate {
 
 function codeHypothesis(id: string): CodeHypothesis {
   return {
-    id, label: `Hypothesis ${id}`, file: 'order_service/db.py', line: 144, symbol: 'get_order_audit',
-    kind: 'predicate', observed: 'WHERE normalize(order_id) = ?', counterfactual: 'WHERE order_id = ?',
+    id, label: `Hypothesis ${id}`, file: 'order_service/db.py', line: 144, line_end: 144,
+    symbol: 'get_order_audit', kind: 'predicate', category: 'DATABASE ISSUE',
+    observed: 'WHERE normalize(order_id) = ?', counterfactual: 'WHERE order_id = ?',
     evidence: 'predicate wraps an indexed column', reason: 'this can defeat the index',
     detector: 'predicate-wrap', testable: true, context: [],
   }
@@ -138,6 +139,25 @@ describe('buildCausalGraph', () => {
     })
     expect(graph.edges.find((e) => e.source === 'repository' && e.target === 'code:h1')).toMatchObject({
       strength: 'link',
+    })
+  })
+
+  it('carries the finding’s engineering-insight category and line range', () => {
+    const graph = buildCausalGraph(baseState({
+      incident: incidentEvent(),
+      found: [codeHypothesis('h1')],
+    }))
+    const node = graph.nodes.find((n) => n.id === 'code:h1')
+    expect(node?.metadata).toMatchObject({ category: 'DATABASE ISSUE', lineEnd: 144 })
+  })
+
+  it('shows a line range in the description when the finding spans more than one line', () => {
+    const graph = buildCausalGraph(baseState({
+      incident: incidentEvent(),
+      found: [{ ...codeHypothesis('h2'), line: 20, line_end: 23 }],
+    }))
+    expect(graph.nodes.find((n) => n.id === 'code:h2')).toMatchObject({
+      description: 'order_service/db.py:20-23',
     })
   })
 

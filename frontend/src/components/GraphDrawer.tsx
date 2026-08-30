@@ -20,8 +20,8 @@ interface CandidateMeta {
   filesChanged: number; linesChanged: number; changedFiles: string[]
 }
 interface CodeChangeMeta {
-  file: string; line: number; symbol: string; kind: string
-  observed: string; counterfactual: string | null
+  file: string; line: number; lineEnd?: number; symbol: string; kind: string
+  category?: string; observed: string; counterfactual: string | null
   evidence: string; reason: string; detector: string
 }
 interface ExperimentPhase {
@@ -109,32 +109,41 @@ function CandidateBody({ meta }: { meta: CandidateMeta }) {
           value={<ul className="drawer-list">{meta.changedFiles.map((f) => <li key={f} className="mono">{f}</li>)}</ul>}
         />
       )}
+      <p className="small faint drawer-note">
+        Relevant deployment identified. This is the bundled demonstration's fabricated
+        deploy record — no line-level source location applies to it.
+      </p>
     </Section>
   )
 }
 
 function CodeChangeBody({ meta }: { meta: CodeChangeMeta }) {
+  // meta.reason is a deterministic detector's own rationale - regex/AST
+  // output, not a language model's - so it belongs under OBSERVED FACTS
+  // with everything else this same detector reported, never under an
+  // "AI INTERPRETATION" heading nothing here earned. The only genuine AI
+  // interpretation for a hypothesis is the planner's reasoning_summary,
+  // shown in ExperimentBody once one exists.
+  const location = meta.lineEnd && meta.lineEnd !== meta.line
+    ? `${meta.line}-${meta.lineEnd}` : `${meta.line}`
   return (
-    <>
-      <Section title="OBSERVED FACTS">
-        <Field label="File" value={<span className="mono">{meta.file}:{meta.line}</span>} />
-        <Field label="Symbol" value={<span className="mono">{meta.symbol}</span>} />
-        <Field label="Kind" value={meta.kind} />
-        <Field label="Detected by" value={<span className="mono">{meta.detector}</span>} />
-        <Field label="Found" value={<code className="hyp-observed">{meta.observed}</code>} />
-        {meta.counterfactual && (
-          <Field label="Would test" value={<code className="hyp-counterfactual">{meta.counterfactual}</code>} />
-        )}
-        <Field label="Evidence" value={meta.evidence} />
-      </Section>
-      <Section title="AI INTERPRETATION">
-        <p className="small faint drawer-note">{meta.reason}</p>
-        <p className="small faint drawer-note">
-          Found by static analysis, not by measurement — being on this graph is not
-          evidence of anything. Only the experiment below can say what it costs.
-        </p>
-      </Section>
-    </>
+    <Section title="OBSERVED FACTS">
+      {meta.category && <Field label="Engineering insight" value={<span className="mono">{meta.category}</span>} />}
+      <Field label="File" value={<span className="mono">{meta.file}:{location}</span>} />
+      <Field label="Symbol" value={<span className="mono">{meta.symbol}</span>} />
+      <Field label="Kind" value={meta.kind} />
+      <Field label="Detected by" value={<span className="mono">{meta.detector}</span>} />
+      <Field label="Found" value={<code className="hyp-observed">{meta.observed}</code>} />
+      {meta.counterfactual && (
+        <Field label="Would test" value={<code className="hyp-counterfactual">{meta.counterfactual}</code>} />
+      )}
+      <Field label="Evidence" value={meta.evidence} />
+      <p className="small faint drawer-note">{meta.reason}</p>
+      <p className="small faint drawer-note">
+        Found by static analysis, not by measurement — being on this graph is not
+        evidence of anything. Only the experiment below can say what it costs.
+      </p>
+    </Section>
   )
 }
 

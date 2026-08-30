@@ -573,6 +573,10 @@ table.phases-table td.st-unstable, table.phases-table td.st-inconclusive { color
 .hyp-flag { font: 700 10.5px/1 var(--mono); letter-spacing: 0.1em; padding: 5px 9px; border-radius: 3px; border: 1px solid; }
 .hyp-flag.ok { color: var(--green); border-color: var(--green); }
 .hyp-flag.off { color: var(--text-faint); border-color: var(--line-strong); }
+.hyp-category {
+  font: 10.5px/1 var(--mono); letter-spacing: 0.08em; padding: 5px 9px;
+  border-radius: 3px; border: 1px solid var(--line-strong); color: var(--text-dim);
+}
 
 .hyp-code { display: flex; align-items: baseline; gap: 12px; margin: 4px 0; flex-wrap: wrap; }
 .hyp-code-label { font: 11px/1 var(--mono); letter-spacing: 0.08em; color: var(--text-faint); width: 80px; flex: 0 0 auto; }

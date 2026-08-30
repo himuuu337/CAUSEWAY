@@ -161,17 +161,21 @@ export function buildCausalGraph(state: InvestigationState, monitor?: MonitorSta
 
   for (const hypothesis of state.found) {
     const id = `code:${hypothesis.id}`
+    const location = hypothesis.line_end && hypothesis.line_end !== hypothesis.line
+      ? `${hypothesis.line}-${hypothesis.line_end}` : `${hypothesis.line}`
     nodes.push({
       id,
       type: 'code_change',
       label: hypothesis.label,
-      description: `${hypothesis.file}:${hypothesis.line}`,
+      description: `${hypothesis.file}:${location}`,
       status: hypothesis.testable ? 'testable' : 'not testable',
       metadata: {
         file: hypothesis.file,
         line: hypothesis.line,
+        lineEnd: hypothesis.line_end,
         symbol: hypothesis.symbol,
         kind: hypothesis.kind,
+        category: hypothesis.category,
         observed: hypothesis.observed,
         counterfactual: hypothesis.counterfactual,
         evidence: hypothesis.evidence,

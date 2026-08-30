@@ -81,13 +81,25 @@ export interface Validation {
  * label on a fabricated deploy, but a file, a line, the exact text found
  * there and the counterfactual that would be written to test it.
  */
+/** A fixed vocabulary, assigned only by which deterministic detector found
+ * the finding - never guessed per finding. 'UNKNOWN' is honest, not a
+ * placeholder: a detector this vocabulary does not yet name still reports
+ * its finding, just without a category claimed for it. */
+export type EngineeringInsightCategory =
+  | 'PERFORMANCE REGRESSION' | 'LOGIC ISSUE' | 'DATABASE ISSUE' | 'CONFIGURATION ISSUE'
+  | 'DEPENDENCY ISSUE' | 'RESOURCE ISSUE' | 'SECURITY ISSUE' | 'REGRESSION' | 'UNKNOWN'
+
 export interface CodeHypothesis {
   id: string
   label: string
   file: string
   line: number
+  /** The last line `observed` occupies. Equal to `line` for a single-line
+   * finding - never a guess, always derived from the observed text itself. */
+  line_end: number
   symbol: string
   kind: string
+  category: EngineeringInsightCategory
   observed: string
   counterfactual: string | null
   evidence: string
