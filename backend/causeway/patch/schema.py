@@ -11,7 +11,34 @@ from causeway.planner.schema import Check, ProviderUnavailable  # re-exported
 
 __all__ = ["MAX_FILES", "MAX_HUNKS_PER_FILE", "MAX_TOTAL_HUNKS", "MAX_HUNK_CHARS",
           "PATCH_SCHEMA", "PatchHunk", "PatchFile", "CodePatch", "PatchRequest",
-          "Check", "ProviderUnavailable", "ProviderTimeout"]
+          "Check", "ProviderUnavailable", "ProviderTimeout", "REASON_CODES",
+          "GEMINI_TIMEOUT", "GEMINI_HTTP_ERROR", "GEMINI_RATE_LIMIT",
+          "GEMINI_INVALID_RESPONSE", "GEMINI_INVALID_JSON", "GEMINI_SCHEMA_ERROR",
+          "EMPTY_PATCH", "PATCH_VALIDATION_REJECTED", "SOURCE_CONTEXT_INSUFFICIENT",
+          "NEEDS_CLARIFICATION", "NO_ACTIONABLE_DEFECT_FOUND", "UNKNOWN_PLANNER_FAILURE"]
+
+# Why a patch attempt produced no patch. Internal diagnostics - carried on
+# patch_generation_failed events and PatchOutcome.reason_code for backend
+# logs and tests - never a substitute for the clean sentence a dashboard
+# actually shows (causeway.patch.display_rejection_reason).
+GEMINI_TIMEOUT = "GEMINI_TIMEOUT"
+GEMINI_HTTP_ERROR = "GEMINI_HTTP_ERROR"
+GEMINI_RATE_LIMIT = "GEMINI_RATE_LIMIT"
+GEMINI_INVALID_RESPONSE = "GEMINI_INVALID_RESPONSE"
+GEMINI_INVALID_JSON = "GEMINI_INVALID_JSON"
+GEMINI_SCHEMA_ERROR = "GEMINI_SCHEMA_ERROR"
+EMPTY_PATCH = "EMPTY_PATCH"
+PATCH_VALIDATION_REJECTED = "PATCH_VALIDATION_REJECTED"
+SOURCE_CONTEXT_INSUFFICIENT = "SOURCE_CONTEXT_INSUFFICIENT"
+NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
+NO_ACTIONABLE_DEFECT_FOUND = "NO_ACTIONABLE_DEFECT_FOUND"
+UNKNOWN_PLANNER_FAILURE = "UNKNOWN_PLANNER_FAILURE"
+
+REASON_CODES = (GEMINI_TIMEOUT, GEMINI_HTTP_ERROR, GEMINI_RATE_LIMIT,
+               GEMINI_INVALID_RESPONSE, GEMINI_INVALID_JSON, GEMINI_SCHEMA_ERROR,
+               EMPTY_PATCH, PATCH_VALIDATION_REJECTED, SOURCE_CONTEXT_INSUFFICIENT,
+               NEEDS_CLARIFICATION, NO_ACTIONABLE_DEFECT_FOUND, UNKNOWN_PLANNER_FAILURE)
+
 
 class ProviderTimeout(ProviderUnavailable):
     """The provider was reachable but did not answer within its deadline.

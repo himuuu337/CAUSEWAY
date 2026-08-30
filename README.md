@@ -31,6 +31,7 @@ editing that source in disposable copies.
 | Milestone 5 | Gemini plans a fix, verified in a disposable sandbox copy · **done** |
 | Milestone 6 | GitHub repository ingestion, narrowly scoped · **done** |
 | Milestone 7 | the repository path becomes the real path: source-read hypotheses, source-edit experiments, repository-owned database, user intent · **done** |
+| Milestone 8 | live telemetry → deterministic risk detection → confirmed incident → automatic handoff into the same causal investigation · **done** |
 
 ## What the dashboard shows, and what it is not allowed to do
 
@@ -100,6 +101,14 @@ The command line still works and needs no dependencies at all:
 | `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
 | `GET /api/investigation/stream` | Server-Sent Events, resumable |
 | `GET /api/investigation/{id}/events` | the whole buffer as JSON |
+| `POST /api/telemetry` | ingest one real telemetry sample for one service |
+| `GET /api/prediction/status` | the engine's current risk assessment(s), as last computed - optionally `?service=` |
+| `POST /api/services/register` | link a service name to the GitHub repository its incidents should hand off to |
+| `GET /api/services` | the currently registered service → repository links |
+| `GET /api/monitor/stream` | Server-Sent Events - telemetry, risk, and incident events, independent of any one investigation |
+
+See [Live monitoring](#live-monitoring--telemetry-prediction-and-incident-handoff) below for what each of
+the five monitoring endpoints actually does and does not decide.
 
 `POST /api/investigation` takes an optional JSON body. With no body at all it
 runs the bundled demonstration, exactly as before these fields existed:
@@ -706,6 +715,148 @@ never quietly disagree about what "denied" means.
   adapter here is rejected, honestly, for that — never silently treated as
   one of the ones above.
 
+## Live monitoring — telemetry, prediction, and incident handoff
+
+Everything above starts from a human typing a repository URL and an
+instruction. Milestone 8 adds a second front door: a running service that
+posts its own real telemetry, a deterministic engine that watches that
+telemetry for sustained movement toward a known failure condition, and — only
+once that movement is *confirmed*, not glimpsed — an incident that hands
+itself to the same causal investigation described above, evidence attached.
+
+    LIVE APPLICATION → LIVE TELEMETRY → DETERMINISTIC RISK DETECTION →
+    CONFIRMED INCIDENT → RUNTIME EVIDENCE + REPOSITORY CONTEXT →
+    CAUSEWAY CAUSAL DEBUGGER (unchanged from everything above)
+
+Causeway monitors telemetry from a running service and looks for sustained
+movement toward known failure conditions. When a risk becomes significant, it
+captures the runtime evidence and starts a causal investigation against the
+service's repository. Gemini proposes testable hypotheses and source changes,
+but deterministic validators, sandbox experiments, and measured recovery
+determine whether the cause and fix are verified.
+
+Nothing about the causal core changes to make this work. A telemetry-triggered
+investigation runs through `repo_investigation.py`, the same detectors, the
+same seven-phase experiment, the same verdict module nothing model-shaped can
+reach. What's new sits entirely upstream of it, deciding *when* to start one
+and *with what evidence* — never deciding a root cause or a verdict itself.
+
+### Telemetry is measured, not modelled
+
+`POST /api/telemetry` accepts one JSON sample per call:
+
+    {
+      "service": "order-service-pool",
+      "timestamp": "2026-08-30T12:00:04Z",
+      "cpu_percent": 41.2, "memory_percent": 58.0,
+      "request_rate": 12.5, "p50_ms": 38.0, "p95_ms": 210.0, "p99_ms": 480.0,
+      "error_rate": 0.02,
+      "db_pool_used": 9, "db_pool_capacity": 12, "db_waiting_requests": 3,
+      "db_query_p95_ms": 61.0,
+      "rate_limit_429_rate": 0.0, "rate_limit_remaining": 200
+    }
+
+`causeway/telemetry/schema.py` validates every field before it is stored:
+unknown fields, `NaN`/`inf`, out-of-range values, and booleans posing as
+numbers are all rejected with `400` — Causeway never guesses a metric that
+wasn't actually reported, and it never fabricates a sample to fill a gap.
+`causeway/telemetry/store.py` keeps a bounded, per-service rolling window in
+memory (`MAX_SAMPLES_PER_SERVICE = 240`); there is no telemetry database and
+none is implied.
+
+### Detection is deterministic, and it is a risk score, not a prediction of doom
+
+`causeway/prediction/` holds three purpose-built detectors, each a plain
+function over the recent window — no model, no training, no Gemini call on
+this path at all:
+
+| detector | watches for |
+|---|---|
+| `connection_pool_exhaustion` | pool utilisation rising, requests starting to wait, query latency rising with it |
+| `memory_pressure` | memory rising over time, independent of request volume |
+| `latency_degradation` | p95 latency and error rate both moving away from their own baseline |
+
+Each produces a `RiskAssessment`: a level (`LOW`/`MEDIUM`/`HIGH`), a plain-text
+evidence list built from the actual numbers (`"pool 55→96 (util 96%)"`, not a
+paraphrase), and — only when the trend supports it — an ETA in seconds to the
+threshold, computed from an OLS slope over real samples
+(`causeway/prediction/trends.py`), never asserted without one.
+
+A single elevated sample is never enough. `causeway/prediction/engine.py`
+requires `CONFIRM_AFTER = 3` **consecutive** raw-HIGH evaluations before a risk
+is `confirmed`, and `RECOVER_AFTER = 3` consecutive non-HIGH evaluations
+before it is considered to have recovered — this is the hysteresis that keeps
+one noisy sample from opening an incident, and keeps a recovered service from
+immediately reopening one. The engine also evaluates each service against a
+bounded recent window (`RECENT_WINDOW = 20` samples), not its entire history,
+so a second incident episode is judged on its own trend rather than one
+contaminated by the first.
+
+### An incident is created only on confirmation, and only once per episode
+
+`causeway/incidents.py` is edge-triggered: it watches for the transition from
+*not confirmed* to *confirmed*, not the state itself, so a risk that stays
+HIGH for fifty consecutive samples opens exactly one incident, not fifty. When
+one opens, and the service has been linked to a repository
+(`POST /api/services/register`), the incident hands off automatically into a
+real investigation — the same `run_starter` any manual repository run uses —
+carrying the confirmed risk's evidence into the instruction Gemini receives.
+An unlinked service's incident is created with
+`status: AWAITING_REPOSITORY_CONTEXT` and waits; it is never silently
+discarded, and it is never investigated against a repository nobody linked to
+it.
+
+`POST /api/services/register` runs the same `causeway.repository.validate_url`
+allow-list the manual investigation form uses — registering a service is not
+a lighter-weight way to point Causeway at a repository the real investigation
+path would have refused.
+
+### Watching it happen
+
+`GET /api/monitor/stream` is a second, independent SSE stream (the frontend's
+`useMonitor` hook, mirroring `useInvestigation`'s render-only discipline) that
+carries five event types as they happen: `telemetry_received`,
+`risk_updated`, `failure_predicted` (emitted only once a risk reaches HIGH),
+`incident_created`, and `investigation_handoff`. The `MonitorPanel` component
+renders exactly what arrives — the risk pill, its evidence lines and its ETA
+are all copied from the event's own fields, never recomputed. Clicking a
+linked incident's "view investigation" attaches the existing
+`useInvestigation` stream to the run the handoff already started, so the rest
+of the page — hypotheses, experiments, verdicts — is the identical component
+tree the manual repository path renders.
+
+To see it live: `python -m causeway.cli telemetry-demo` drives real HTTP load
+against a small bundled fixture service (`demo-repo-pool/`, a connection pool
+sized to exhaust under sustained load) and posts its *actually observed*
+metrics — nothing simulated — to `/api/telemetry` every two seconds. Left
+running, utilisation climbs, waiting requests appear, p95 and the error rate
+follow, the engine confirms `connection_pool_exhaustion`, an incident opens,
+and — if the service was registered against a repository — an investigation
+starts on its own.
+
+### What this is not
+
+This is a hackathon prototype, not a guarantee of predicting every production
+outage. The three bundled detectors cover three specific, well-understood
+failure shapes; a service degrading in a way none of them model produces no
+risk assessment at all, and Causeway says nothing rather than inventing a
+guess. There is no machine learning here and no plan to add one on this path —
+the detectors are the same kind of deterministic, inspectable arithmetic as
+the rest of the causal core. Gemini is never called by the prediction path
+itself; it is only reached once a human (or a confirmed incident's automatic
+handoff) starts an actual investigation. And nothing on this path ever
+deploys, restarts, or scales anything in production — it observes, scores,
+and, at most, opens an investigation against a disposable sandbox copy of the
+repository, exactly as every other path in this README does.
+
+**Extensibility, stated rather than built**: telemetry arrives today as one
+JSON `POST` per sample, which is deliberately the smallest possible surface —
+adding a receiver that unpacks an OpenTelemetry OTLP metrics payload into the
+same `validate_sample()` call is a translation layer at the edge, not a
+change to detection, hysteresis, or incident logic. That translation layer is
+out of scope for this milestone and was not built; the schema it would feed
+already exists.
+
 ## The bundled demonstration
 
 Running with no repository URL runs the bundled A/B demonstration: two
@@ -759,6 +910,7 @@ What differs is what a variable *is*.
         analysis/
           hypothesis.py     CodeHypothesis - a file, a line, a counterfactual
           detectors.py      hypotheses read out of real source; no manifest input
+          detectors_pool.py resource-release-not-guaranteed - AST acquire/release pairs
         intent/
           schema.py         IntentSpec, enforceable vs advisory constraints
           deterministic.py  the offline instruction reader
@@ -791,6 +943,23 @@ What differs is what a variable *is*.
         patch/              the CodePatch model + deterministic validator shared
                             by causeway.requested_change AND
                             causeway.standard_investigation
+        telemetry/
+          schema.py         validate_sample() - the only way a sample enters Causeway
+          store.py          bounded, per-service, thread-safe rolling window
+        prediction/
+          schema.py         RiskAssessment - level, evidence, ETA; no verdict field
+          base.py           the Detector contract every detector implements
+          trends.py         slope/median/persistence/ETA - pure functions, no model
+          connection_pool.py / memory_pressure.py / latency_degradation.py
+          registry.py       every detector, in the order they are evaluated
+          engine.py         hysteresis: CONFIRM_AFTER / RECOVER_AFTER, bounded window
+        incidents.py        edge-triggered incident creation + investigation handoff
+        services.py         service name → repository link, same URL allow-list
+        monitor.py          the live-monitoring SSE stream, independent of any run
+        production.py       wires telemetry → prediction → incidents → monitor feed
+        demo/
+          production_service.py  real HTTP load against demo-repo-pool, real
+                            telemetry posted from what was actually observed
         standard_investigation.py  a repository with no causeway.json: propose,
                             validate, apply to a disposable copy, verify with
                             whatever that file's language can safely check
@@ -813,3 +982,6 @@ What differs is what a variable *is*.
       fixtures/             the bundled demo's recorded traffic (portable, in git)
       .data/                this machine's database and calibration (not in git)
     demo-repo/              a real repository with two identical-looking suspects
+    demo-repo-pool/         a real, reproducible connection-pool-exhaustion bug,
+                            fed by causeway.demo.production_service for the
+                            live telemetry → prediction → incident demo

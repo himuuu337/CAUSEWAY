@@ -97,6 +97,17 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
         sources=context.sources, patchable=context.patchable,
         file_contents=file_contents, acceptance=context.probes,
     )
+    guard = patcher.check_actionable(request)
+    if guard is not None:
+        message = patcher.message_for_reason_code(guard)
+        yield {"type": "patch_generation_failed", "stage": "planning", "reason_code": guard,
+              "message": message, "elapsed_ms": 0.0,
+              "selected_file_count": len(file_contents),
+              "selected_char_count": sum(len(v) for v in file_contents.values())}
+        yield {"type": "patch_rejected", "reason": message}
+        yield {"type": "done", "elapsed_s": round(time.time() - started, 1)}
+        return
+
     provider = patcher.default_patch_provider(offline=offline)
     yield _stage("patch_planning", "running", planner=provider.name)
     outcome = patcher.plan_patch(request, provider, context.workspace, intent=intent)
@@ -109,6 +120,8 @@ def run(context, intent, offline: bool = None) -> Iterator[dict]:
     yield _stage("patch_validation", "done")
 
     if not outcome.report.accepted:
+        yield dict({"type": "patch_generation_failed", "stage": "gemini"},
+                  **outcome.diagnostics())
         yield {"type": "patch_rejected",
                "reason": patcher.display_rejection_reason(outcome),
                "detail": outcome.fallback_reason}

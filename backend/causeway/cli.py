@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import textwrap
+import time
 
 from causeway import config, fix_verdict, intent, verdict
 from causeway.sandbox import seed as seedmod
@@ -125,6 +126,9 @@ _VERDICT_COLOUR = {verdict.PROVEN: "green", verdict.REFUTED: "red",
 _FIX_VERDICT_COLOUR = {fix_verdict.VERIFIED: "green", fix_verdict.FAILED: "red",
                        fix_verdict.UNRESOLVED: "yellow"}
 
+_REQUESTED_CHANGE_COLOUR = {"VERIFIED": "green", "FAILED": "red", "UNRESOLVED": "yellow",
+                            "IMPLEMENTED_VERIFICATION_INCOMPLETE": "yellow"}
+
 _STATE_MARK = {"broken": "BROKEN", "healthy": "HEALTHY",
                "inconclusive": "INCONCLUSIVE", "unstable": "UNSTABLE"}
 
@@ -190,13 +194,17 @@ def cmd_investigate(args) -> int:
             print(" commit %s   service %s   runtime %s"
                  % (event["commit_sha"][:12], event["service"], event["runtime"]))
             print(style.green("   supported Causeway project"))
-            print(style.dim("   runs python %s   analyses %s   patchable %s"
-                            % (event["entrypoint"], ", ".join(event["sources"]),
+            print(style.dim("   runs %s %s   analyses %s   patchable %s"
+                            % (event["runtime"], event["entrypoint"], ", ".join(event["sources"]),
                                ", ".join(event["patchable"]))))
-            tables = ", ".join("%s %s rows" % (name, "{:,}".format(rows))
-                               for name, rows in sorted(event["database"]["tables"].items()))
-            print(style.dim("   database built from this repository's own schema: %s"
-                            % tables))
+            if event["database"] is not None:
+                tables = ", ".join("%s %s rows" % (name, "{:,}".format(rows))
+                                   for name, rows in sorted(event["database"]["tables"].items()))
+                print(style.dim("   database built from this repository's own schema: %s"
+                                % tables))
+            else:
+                print(style.dim("   no causeway.json manifest - standard repository "
+                                "analysis, no database built"))
 
         elif kind == "repository_rejected":
             print(style.red(" UNSUPPORTED REPOSITORY (%s): %s"
@@ -204,6 +212,72 @@ def cmd_investigate(args) -> int:
             print(style.dim(" this repository does not contain a supported Causeway "
                             "demo configuration"), file=sys.stderr)
             return 2
+
+        elif kind == "requested_change_start":
+            _rule(style.bold(" [%d] SOURCE READ" % step("source_read"))
+                  + style.dim("   no manifest - every mode funnels through here"))
+            print("   %d file%s considered: %s"
+                  % (len(event["files_considered"]),
+                     "" if len(event["files_considered"]) == 1 else "s",
+                     ", ".join(event["files_considered"]) or "(none)"))
+
+        elif kind == "language_detected":
+            counts = ", ".join("%s %d" % (lang, n) for lang, n in event["counts"].items())
+            print("   language        %s   detected %s"
+                  % (style.bold(event["primary"] or "(none)"), counts or "(none)"))
+
+        elif kind == "source_selection":
+            print("   selected        %s" % (", ".join(event["files"]) or "(none)"))
+            print(style.dim("   entrypoint      %s   tests %s"
+                            % (event["entrypoint"] or "(none recognisable)",
+                               "found - " + event["tests_note"] if event["tests_detected"]
+                               else "none found - " + event["tests_note"])))
+
+        elif kind == "patch_rejected":
+            print("   " + style.yellow(style.bold("NO PATCH APPLIED")))
+            _wrap(event["reason"], "     ")
+
+        elif kind == "patch_plan":
+            prov = event["provenance"]
+            if prov["used_fallback"]:
+                label = "DETERMINISTIC FALLBACK"
+            elif prov["kind"] == "gemini":
+                label = "GEMINI (%s)" % prov["source"].replace("gemini:", "")
+            else:
+                label = "DETERMINISTIC PLANNER"
+            patch = event["patch"]
+            print("   patch designed by %s" % style.cyan(style.bold(label)))
+            print("   summary         %s" % patch["summary"])
+            print("   files           %s" % ", ".join(f["path"] for f in patch["files"]))
+
+        elif kind == "patch_validation":
+            mark = style.green(style.bold("%d/%d PASSED" % (event["passed"], event["total"])))
+            print("   patch validator %s" % mark)
+            for check in event["checks"]:
+                tick = style.green("ok") if check["passed"] else style.red("NO")
+                print(style.dim("     %s  %-31s %s"
+                                % (tick, check["name"], check["detail"][:36])))
+
+        elif kind == "patch_apply":
+            print(style.green("   PATCH APPLIED") + style.dim("  %s" % event["applied_to"]))
+            print("   summary         %s" % event["summary"])
+            print("   files           %s" % ", ".join(event["files"]))
+
+        elif kind == "verification_check":
+            tick = style.green("ok") if event["passed"] else style.red("NO")
+            print(style.dim("     %s  [%s] %-24s %s"
+                            % (tick, event["language"], event["name"], event["detail"][:36])))
+
+        elif kind == "requested_change_verdict":
+            paint = getattr(style, _REQUESTED_CHANGE_COLOUR.get(event["verdict"], "yellow"))
+            print("   %s  %s" % (style.dim("VERDICT"), style.bold(paint(event["verdict"]))))
+            _wrap(event["reason"], "     ")
+            if event["verdict"] != "VERIFIED":
+                status = 3
+
+        elif kind == "done":
+            print(style.dim("   completed in %.1fs" % event["elapsed_s"]))
+            print("=" * WIDTH)
 
         elif kind == "incident":
             incident = event["incident"]
@@ -533,6 +607,55 @@ def cmd_gemini_check(args) -> int:
     return 1
 
 
+# ---------------------------------------------------------- telemetry demo
+
+def cmd_telemetry_demo(args) -> int:
+    """Runs a real order-service with a real connection-pool bug, drives
+    real load against it, and posts what actually happened to Causeway's
+    /api/telemetry - the live counterpart to `investigate`: this produces
+    the incident an investigation is run against, rather than running one
+    itself. Requires `python -m causeway.api` (or `causeway.cli investigate`
+    is not enough here) already running and reachable at --causeway-url."""
+    from causeway.demo import production_service
+
+    style = Style(enabled=not args.no_color)
+    print("Causeway - live telemetry demo")
+    _rule()
+    print("  starting order-service-pool: a real HTTP service with a real")
+    print("  connection-pool bug (causeway.analysis.detectors_pool finds it")
+    print("  in demo-repo-pool/app.py, the same source this service runs)")
+    print("  reporting real telemetry to %s every %.0fs"
+          % (args.causeway_url, production_service.TELEMETRY_INTERVAL_SECONDS))
+    print("  Ctrl-C to stop")
+    print()
+
+    started_at = time.time()
+
+    def on_sample(sample, posted):
+        used, capacity = sample.get("db_pool_used"), sample.get("db_pool_capacity")
+        utilisation = (used / capacity * 100.0) if used is not None and capacity else None
+        line = ("  t+%6.1fs  req/s=%5.1f  p95=%7.1fms  err=%5.1f%%"
+               % (time.time() - started_at, sample.get("request_rate", 0.0),
+                  sample.get("p95_ms", 0.0), sample.get("error_rate", 0.0) * 100.0))
+        if utilisation is not None:
+            line += ("  pool=%5.1f%%  waiting=%3d"
+                    % (utilisation, sample.get("db_waiting_requests", 0)))
+        line += "  " + (style.green("posted") if posted
+                        else style.red("POST FAILED - is `python -m causeway.api` running?"))
+        print(line)
+
+    try:
+        production_service.run(causeway_url=args.causeway_url, service_name=args.service,
+                               duration_seconds=args.duration, on_sample=on_sample)
+    except KeyboardInterrupt:
+        print()
+        print("  stopped")
+    except RuntimeError as exc:
+        print(style.red("  %s" % exc), file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="causeway")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -562,9 +685,22 @@ def main(argv=None) -> int:
                            help="is the Gemini planner configured and working")
     check.add_argument("--no-color", action="store_true")
 
+    demo = sub.add_parser(
+        "telemetry-demo",
+        help="run a real service with a real connection-pool bug and report "
+            "real telemetry to a running Causeway backend")
+    demo.add_argument("--no-color", action="store_true")
+    demo.add_argument("--causeway-url", default="http://127.0.0.1:8000",
+                      help="where python -m causeway.api is listening")
+    demo.add_argument("--service", default="order-service-pool")
+    demo.add_argument("--duration", type=float, default=None,
+                      help="seconds to run before stopping automatically "
+                          "(default: run until Ctrl-C)")
+
     args = parser.parse_args(argv)
     return {"seed": cmd_seed, "investigate": cmd_investigate,
-            "events": cmd_events, "gemini-check": cmd_gemini_check}[args.command](args)
+            "events": cmd_events, "gemini-check": cmd_gemini_check,
+            "telemetry-demo": cmd_telemetry_demo}[args.command](args)
 
 
 if __name__ == "__main__":

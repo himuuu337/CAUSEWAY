@@ -18,6 +18,7 @@ executed on its own; everything here is wiring.
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query, Request
@@ -25,9 +26,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from causeway import config, intent, stream, verdict
+from causeway import config, intent, monitor, production, stream, verdict
 from causeway.incident import INCIDENT
+from causeway.incidents import manager as incident_manager
+from causeway.prediction.engine import engine as prediction_engine
 from causeway.runs import AlreadyRunning, manager
+from causeway.services import registry as service_registry
+from causeway.telemetry import TelemetryRejected, validate_sample
+from causeway.telemetry.store import store as telemetry_store
 
 FRONTEND_DIST = os.path.join(os.path.dirname(config.BACKEND_ROOT),
                              "frontend", "dist")
@@ -78,6 +84,84 @@ def health() -> dict:
 @app.get("/api/status")
 def status() -> dict:
     return manager.status()
+
+
+# ------------------------------------------------------------------ telemetry
+#
+#     POST /api/telemetry           ingest one real sample, cheap, synchronous
+#     GET  /api/prediction/status   the current risk picture for one service
+#     POST /api/services/register   link a service name to its GitHub repository
+#     GET  /api/services            every registered link
+#     GET  /api/monitor/stream      SSE: telemetry_received, risk_updated,
+#                                    failure_predicted, incident_created,
+#                                    investigation_handoff
+#
+# causeway.production.ingest does the real work (store -> evaluate -> maybe
+# open an incident -> maybe hand off) - this is wiring, exactly like
+# /api/investigation below is wiring around causeway.runs.
+
+@app.post("/api/telemetry")
+def post_telemetry(payload: dict = Body(...)):
+    try:
+        sample = validate_sample(payload, now=time.time())
+    except TelemetryRejected as exc:
+        raise HTTPException(status_code=400, detail={"reason": "rejected", "message": str(exc)})
+    summary = production.ingest(sample, telemetry=telemetry_store, predictor=prediction_engine,
+                                incidents=incident_manager, monitor=monitor.manager)
+    return JSONResponse(status_code=200, content=summary)
+
+
+@app.get("/api/prediction/status")
+def prediction_status(service: Optional[str] = Query(None)):
+    if service:
+        return prediction_engine.status(service)
+    return {"services": [prediction_engine.status(name) for name in telemetry_store.services()]}
+
+
+@app.post("/api/services/register")
+def register_service(payload: dict = Body(...)):
+    service = payload.get("service")
+    repository_url = payload.get("repository_url")
+    if not isinstance(service, str) or not service.strip():
+        raise HTTPException(status_code=400,
+                            detail={"reason": "bad-request", "message": "service is required"})
+    if not isinstance(repository_url, str) or not repository_url.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"reason": "bad-request", "message": "repository_url is required"})
+    try:
+        target = service_registry.register(
+            service, repository_url, branch=payload.get("branch") or "",
+            investigation_mode=payload.get("investigation_mode") or intent.DIAGNOSE_AND_FIX)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,
+                            detail={"reason": "bad-request", "message": str(exc)})
+    except Exception as exc:                       # RepositoryRejected
+        raise HTTPException(status_code=400,
+                            detail={"reason": "rejected", "message": str(exc)})
+    return JSONResponse(status_code=200, content=target.as_dict())
+
+
+@app.get("/api/services")
+def list_services():
+    return {"services": [t.as_dict() for t in service_registry.all().values()]}
+
+
+@app.get("/api/monitor/stream")
+async def monitor_stream(
+    request: Request,
+    from_index: int = Query(0, alias="from"),
+    last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+):
+    return StreamingResponse(
+        monitor.monitor_stream(
+            monitor.manager,
+            start_index=stream.resume_index(from_index, last_event_id),
+            is_disconnected=request.is_disconnected,
+        ),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
 
 
 # ------------------------------------------------------------- investigation

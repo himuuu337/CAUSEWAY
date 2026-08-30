@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "service": "order-service-pool",
+  "runtime": "python",
+  "entrypoint": "app.py",
+  "sources": ["app.py", "pool.py"],
+  "patchable": ["app.py", "pool.py"],
+  "workload": "workload.json",
+  "verification": "latency_p95",
+  "incident": {
+    "id": "INCIDENT-POOL-001",
+    "title": "Order Service Connection Pool Exhaustion",
+    "service": "order-service-pool",
+    "symptom": "p95 latency and error rate climb under sustained load as the connection pool runs out of capacity",
+    "detected_at": "2026-08-30T10:00:00Z"
+  },
+  "database": {
+    "engine": "sqlite",
+    "schema": "schema.sql",
+    "seed": [
+      {
+        "table": "status_label",
+        "columns": ["code", "label"],
+        "values": [["OK", "Ok"]]
+      }
+    ]
+  }
+}

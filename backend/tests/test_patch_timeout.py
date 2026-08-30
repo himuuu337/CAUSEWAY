@@ -181,11 +181,11 @@ class PlanPatchTimeoutTests(unittest.TestCase):
 # -------------------------------------------------------- the clean message
 
 class DisplayRejectionReasonTests(unittest.TestCase):
-    def _make_outcome(self, timed_out=False, checks=(), fallback_reason=""):
+    def _make_outcome(self, timed_out=False, checks=(), fallback_reason="", reason_code=""):
         from causeway.patch import PatchOutcome
         return PatchOutcome(patch=None, report=PatchValidationReport(tuple(checks)),
                             source="x", kind="gemini", timed_out=timed_out,
-                            fallback_reason=fallback_reason)
+                            fallback_reason=fallback_reason, reason_code=reason_code)
 
     def test_a_timeout_gets_the_exact_clean_sentence(self):
         outcome = self._make_outcome(timed_out=True, fallback_reason=(
@@ -220,9 +220,10 @@ class DisplayRejectionReasonTests(unittest.TestCase):
         from causeway.planner.schema import Check
         checks = (Check("before_text_matches_current_source_exactly", False,
                         "the before-text does not match"),)
-        outcome = self._make_outcome(timed_out=False, checks=checks, fallback_reason=(
-            "the patch validator rejected the proposal: "
-            "before_text_matches_current_source_exactly"))
+        outcome = self._make_outcome(
+            timed_out=False, checks=checks, reason_code="PATCH_VALIDATION_REJECTED",
+            fallback_reason=("the patch validator rejected the proposal: "
+                            "before_text_matches_current_source_exactly"))
         shown = display_rejection_reason(outcome)
         self.assertIn("before_text_matches_current_source_exactly", shown)
 

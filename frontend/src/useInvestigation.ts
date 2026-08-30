@@ -817,5 +817,5 @@ export function useInvestigation() {
   const pipeline = useMemo(() => pipelineOf(state), [state])
   const busy = starting || state.runState === 'running'
 
-  return { state, health, busy, starting, start, pipeline }
+  return { state, health, busy, starting, start, attach, pipeline }
 }

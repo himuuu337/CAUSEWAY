@@ -26,10 +26,12 @@ import Conclusion from './components/Conclusion'
 import RepositoryConclusion from './components/RepositoryConclusion'
 import FixPanel from './components/FixPanel'
 import RequestedChangePanel from './components/RequestedChangePanel'
+import MonitorPanel from './components/MonitorPanel'
 import Roadmap from './components/Roadmap'
 import EventFeed from './components/EventFeed'
 import type { HypothesisView } from './useInvestigation'
 import { useInvestigation } from './useInvestigation'
+import { useMonitor } from './useMonitor'
 import './styles.css'
 
 /** The three things a user can ask for, plus letting the words decide. */
@@ -41,7 +43,8 @@ const MODES = [
 ] as const
 
 export default function App() {
-  const { state, health, busy, starting, start, pipeline } = useInvestigation()
+  const { state, health, busy, starting, start, attach, pipeline } = useInvestigation()
+  const monitor = useMonitor()
   const [repoUrl, setRepoUrl] = useState('')
   const [instruction, setInstruction] = useState('')
   const [mode, setMode] = useState<string>('')
@@ -84,6 +87,12 @@ export default function App() {
         runId={state.runId}
         incidentId={state.incident?.incident.id}
         incidentService={state.incident?.incident.service}
+      />
+
+      <MonitorPanel
+        monitor={monitor.state}
+        onConnect={monitor.connect}
+        onOpenInvestigation={(runId) => attach(runId)}
       />
 
       <div className="repo-input-row">

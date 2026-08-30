@@ -381,3 +381,73 @@ export interface Health {
   }
   frontend_built: boolean
 }
+
+/**
+ * The live production-monitoring stream (GET /api/monitor/stream) - a
+ * second, independent SSE feed from the investigation one above. Nothing
+ * here is a verdict: `risk_updated`'s `level`/`confirmed`/`score` are
+ * exactly what causeway.prediction.engine computed, and `incident_created`
+ * fires only once per confirmed episode, never once per sample.
+ */
+export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH'
+
+export interface RiskAssessment {
+  service: string
+  detector: string
+  level: RiskLevel
+  score: number
+  predicted_failure: string
+  evidence: string[]
+  current_values: Record<string, number>
+  trends: Record<string, number>
+  eta_seconds: number | null
+  sample_count: number
+  confirmed: boolean
+}
+
+export type IncidentStatus =
+  | 'AWAITING_REPOSITORY_CONTEXT' | 'INVESTIGATION_STARTED'
+  | 'INVESTIGATION_ALREADY_RUNNING' | 'REGISTRATION_REJECTED'
+
+export interface Incident {
+  incident_id: string
+  service: string
+  kind: string
+  detector: string
+  predicted_failure: string
+  risk_score: number
+  evidence: string[]
+  telemetry_window: {
+    current_values: Record<string, number>
+    trends: Record<string, number>
+    eta_seconds: number | null
+    sample_count: number
+  }
+  created_at: number
+  status: IncidentStatus
+  run_id: string | null
+  detail: string
+}
+
+export type MonitorEvent =
+  | ({ type: 'telemetry_received'; service: string; timestamp: number; t: number }
+      & Record<string, number | string>)
+  | ({ type: 'risk_updated'; t: number } & RiskAssessment)
+  | {
+      type: 'failure_predicted'
+      service: string
+      detector: string
+      predicted_failure: string
+      score: number
+      confirmed: boolean
+      t: number
+    }
+  | ({ type: 'incident_created'; t: number } & Incident)
+  | {
+      type: 'investigation_handoff'
+      incident_id: string
+      service: string
+      status: IncidentStatus
+      run_id: string | null
+      t: number
+    }

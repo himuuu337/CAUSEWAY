@@ -26,7 +26,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence, Tuple
 
-from causeway.analysis import detectors
+from causeway.analysis import detectors, detectors_pool
 from causeway.analysis.hypothesis import CodeHypothesis
 from causeway.repository import database, git, manifest, standard, urlcheck
 from causeway.repository.errors import RepositoryRejected
@@ -153,6 +153,7 @@ def load(cloned: ClonedRepo, ref: RepoRef) -> RepositoryContext:
 
     hypotheses = tuple(detectors.scan_repository(
         cloned.path, spec.schema_relative, spec.sources))
+    hypotheses += tuple(detectors_pool.scan_repository(cloned.path, spec.sources))
     # A repository must offer Causeway SOMETHING to work with: either a
     # testable hypothesis for a diagnosis, or a declared probe an
     # instruction-driven change can be verified against. Neither is required
