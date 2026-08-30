@@ -62,6 +62,11 @@ function codeHypothesis(id: string): CodeHypothesis {
     observed: 'WHERE normalize(order_id) = ?', counterfactual: 'WHERE order_id = ?',
     evidence: 'predicate wraps an indexed column', reason: 'this can defeat the index',
     detector: 'predicate-wrap', testable: true, context: [],
+    excerpt: [
+      { number: 143, text: '    query = (', highlighted: false },
+      { number: 144, text: '        "WHERE normalize(order_id) = ?"', highlighted: true },
+      { number: 145, text: '    )', highlighted: false },
+    ],
   }
 }
 
@@ -149,6 +154,17 @@ describe('buildCausalGraph', () => {
     }))
     const node = graph.nodes.find((n) => n.id === 'code:h1')
     expect(node?.metadata).toMatchObject({ category: 'DATABASE ISSUE', lineEnd: 144 })
+  })
+
+  it('carries the finding’s real source excerpt, unmodified', () => {
+    const graph = buildCausalGraph(baseState({
+      incident: incidentEvent(),
+      found: [codeHypothesis('h1')],
+    }))
+    const node = graph.nodes.find((n) => n.id === 'code:h1')
+    const excerpt = (node?.metadata as { excerpt: { number: number; highlighted: boolean }[] }).excerpt
+    expect(excerpt).toHaveLength(3)
+    expect(excerpt.find((l) => l.highlighted)?.number).toBe(144)
   })
 
   it('shows a line range in the description when the finding spans more than one line', () => {

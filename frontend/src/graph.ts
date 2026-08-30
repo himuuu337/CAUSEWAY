@@ -181,6 +181,7 @@ export function buildCausalGraph(state: InvestigationState, monitor?: MonitorSta
         evidence: hypothesis.evidence,
         reason: hypothesis.reason,
         detector: hypothesis.detector,
+        excerpt: hypothesis.excerpt,
       },
     })
     if (repo) {

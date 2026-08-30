@@ -1,4 +1,4 @@
-import type { Plan, Provenance, Validation } from '../types'
+import type { Plan, Provenance, SourceLine, Validation } from '../types'
 import type { GraphNode } from '../graph'
 import { ms, times } from '../format'
 
@@ -22,7 +22,7 @@ interface CandidateMeta {
 interface CodeChangeMeta {
   file: string; line: number; lineEnd?: number; symbol: string; kind: string
   category?: string; observed: string; counterfactual: string | null
-  evidence: string; reason: string; detector: string
+  evidence: string; reason: string; detector: string; excerpt?: SourceLine[]
 }
 interface ExperimentPhase {
   phase: string; role: 'control' | 'evidence'; p95_ms?: number
@@ -63,6 +63,28 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
     <div className="drawer-field">
       <div className="drawer-field-label">{label}</div>
       <div className="drawer-field-value">{value}</div>
+    </div>
+  )
+}
+
+/** A real window of source, line numbers included, the relevant line(s)
+ * highlighted - every line here is copied verbatim from the file a
+ * detector read, never synthesized. Renders nothing when the detector
+ * built no excerpt, rather than a placeholder. */
+function SourceExcerpt({ file, lines }: { file: string; lines?: SourceLine[] }) {
+  if (!lines || lines.length === 0) return null
+  return (
+    <div className="drawer-field">
+      <div className="drawer-field-label">Source</div>
+      <pre className="source-excerpt mono">
+        {lines.map((line) => (
+          <div key={line.number} className={`source-excerpt-line${line.highlighted ? ' highlighted' : ''}`}>
+            <span className="source-excerpt-number">{line.number}</span>
+            <span className="source-excerpt-text">{line.text}</span>
+          </div>
+        ))}
+      </pre>
+      <div className="small faint drawer-note">{file}</div>
     </div>
   )
 }
@@ -133,7 +155,10 @@ function CodeChangeBody({ meta }: { meta: CodeChangeMeta }) {
       <Field label="Symbol" value={<span className="mono">{meta.symbol}</span>} />
       <Field label="Kind" value={meta.kind} />
       <Field label="Detected by" value={<span className="mono">{meta.detector}</span>} />
-      <Field label="Found" value={<code className="hyp-observed">{meta.observed}</code>} />
+      <SourceExcerpt file={meta.file} lines={meta.excerpt} />
+      {(!meta.excerpt || meta.excerpt.length === 0) && (
+        <Field label="Found" value={<code className="hyp-observed">{meta.observed}</code>} />
+      )}
       {meta.counterfactual && (
         <Field label="Would test" value={<code className="hyp-counterfactual">{meta.counterfactual}</code>} />
       )}

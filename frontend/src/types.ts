@@ -89,6 +89,15 @@ export type EngineeringInsightCategory =
   | 'PERFORMANCE REGRESSION' | 'LOGIC ISSUE' | 'DATABASE ISSUE' | 'CONFIGURATION ISSUE'
   | 'DEPENDENCY ISSUE' | 'RESOURCE ISSUE' | 'SECURITY ISSUE' | 'REGRESSION' | 'UNKNOWN'
 
+/** One real line of source, copied verbatim from the file a detector read -
+ * never synthesized. `highlighted` marks a line the finding itself occupies,
+ * as opposed to the few lines of real surrounding context either side. */
+export interface SourceLine {
+  number: number
+  text: string
+  highlighted: boolean
+}
+
 export interface CodeHypothesis {
   id: string
   label: string
@@ -107,6 +116,9 @@ export interface CodeHypothesis {
   detector: string
   testable: boolean
   context: string[]
+  /** A real window of surrounding source, line numbers included. Empty when
+   * a detector did not build one - never a placeholder for a fabricated one. */
+  excerpt: SourceLine[]
 }
 
 /** What the user asked for, parsed into something enforceable. */

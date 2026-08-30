@@ -51,10 +51,21 @@ export default function HypothesisPanel({ hypotheses, detectors, sources }: Prop
               </span>
             </div>
 
-            <div className="hyp-code">
-              <span className="hyp-code-label">found</span>
-              <code className="hyp-observed">{hypothesis.observed}</code>
-            </div>
+            {hypothesis.excerpt.length > 0 ? (
+              <pre className="source-excerpt mono">
+                {hypothesis.excerpt.map((line) => (
+                  <div key={line.number} className={`source-excerpt-line${line.highlighted ? ' highlighted' : ''}`}>
+                    <span className="source-excerpt-number">{line.number}</span>
+                    <span className="source-excerpt-text">{line.text}</span>
+                  </div>
+                ))}
+              </pre>
+            ) : (
+              <div className="hyp-code">
+                <span className="hyp-code-label">found</span>
+                <code className="hyp-observed">{hypothesis.observed}</code>
+              </div>
+            )}
             {hypothesis.counterfactual && (
               <div className="hyp-code">
                 <span className="hyp-code-label">would test</span>

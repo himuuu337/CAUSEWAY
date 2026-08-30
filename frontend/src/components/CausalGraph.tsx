@@ -53,10 +53,17 @@ function statusColor(status: string): string {
 
 function GraphNodeCard({ data }: NodeProps<GraphNode>) {
   const color = statusColor(data.status)
+  // The only metadata field a node card shows outside its drawer: a real,
+  // deterministic engineering-insight category (see analysis/hypothesis.py),
+  // never anything guessed for this one finding.
+  const category = data.type === 'code_change' ? (data.metadata.category as string | undefined) : undefined
   return (
     <div className="graph-node" style={{ borderColor: color }}>
       <Handle type="target" position={Position.Top} className="graph-node-handle" />
-      <div className="graph-node-type">{NODE_TYPE_LABEL[data.type]}</div>
+      <div className="graph-node-type-row">
+        <div className="graph-node-type">{NODE_TYPE_LABEL[data.type]}</div>
+        {category && category !== 'UNKNOWN' && <div className="graph-node-category">{category}</div>}
+      </div>
       <div className="graph-node-label">{data.label}</div>
       {data.description && <div className="graph-node-desc">{data.description}</div>}
       <div className="graph-node-status" style={{ color }}>{data.status}</div>
