@@ -22,7 +22,8 @@ import os
 import re
 from typing import Dict, List, Sequence, Set, Tuple
 
-from causeway.analysis.hypothesis import CodeHypothesis
+from causeway.analysis.excerpt import excerpt_for
+from causeway.analysis.hypothesis import CodeHypothesis, line_end_of
 
 NAME = "sql_predicate_index_usability"
 
@@ -104,8 +105,9 @@ def scan_source(relative_path: str, source: str, indexed: Set[str]) -> List[Code
 
             # the line the predicate actually sits on, not just the string's start
             offset = sql[:match.start()].count("\n")
+            finding_line = line + offset
             findings.append(CodeHypothesis(
-                file=relative_path, line=line + offset, symbol=symbol,
+                file=relative_path, line=finding_line, symbol=symbol,
                 kind="query_predicate", observed=observed,
                 counterfactual=counterfactual,
                 evidence=observed,
@@ -116,6 +118,7 @@ def scan_source(relative_path: str, source: str, indexed: Set[str]) -> List[Code
                         % (column, wrap, table or "the table")),
                 detector=NAME,
                 context=("table %s" % table if table else "",),
+                excerpt=excerpt_for(source, finding_line, line_end_of(finding_line, observed)),
             ))
     return findings
 

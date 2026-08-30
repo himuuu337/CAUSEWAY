@@ -19,6 +19,7 @@ import ast
 import re
 from typing import List, Optional, Sequence
 
+from causeway.analysis.excerpt import excerpt_for
 from causeway.analysis.hypothesis import CodeHypothesis
 
 NAME = "resource_release_not_guaranteed"
@@ -78,7 +79,7 @@ def _find_pair(body: Sequence[ast.stmt]):
     return None
 
 
-def _derive_finding(relative_path: str, source_lines: Sequence[str],
+def _derive_finding(relative_path: str, source: str, source_lines: Sequence[str],
                     func: ast.FunctionDef, acquire_stmt: ast.stmt, release_stmt: ast.stmt
                     ) -> CodeHypothesis:
     start_line, end_line = acquire_stmt.lineno, release_stmt.end_lineno
@@ -110,6 +111,7 @@ def _derive_finding(relative_path: str, source_lines: Sequence[str],
                "connection pool or lock that slowly runs out of capacity under "
                "load looks like from the source"),
         detector=NAME, context=("symbol %s" % func.name,),
+        excerpt=excerpt_for(source, start_line, end_line),
     )
 
 
@@ -124,7 +126,7 @@ def scan_source(relative_path: str, source: str) -> List[CodeHypothesis]:
             continue
         acquire_index, release_index = pair
         findings.append(_derive_finding(
-            relative_path, lines, node, node.body[acquire_index], node.body[release_index]))
+            relative_path, source, lines, node, node.body[acquire_index], node.body[release_index]))
     return findings
 
 

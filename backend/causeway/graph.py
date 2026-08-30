@@ -302,7 +302,7 @@ def build_graph(events: Sequence[Mapping[str, Any]], incidents: Sequence[Any] = 
                 "kind": hypothesis.get("kind"), "category": hypothesis.get("category"),
                 "observed": hypothesis.get("observed"), "counterfactual": hypothesis.get("counterfactual"),
                 "evidence": hypothesis.get("evidence"), "reason": hypothesis.get("reason"),
-                "detector": hypothesis.get("detector"),
+                "detector": hypothesis.get("detector"), "excerpt": hypothesis.get("excerpt") or [],
             },
         })
         if repo:
