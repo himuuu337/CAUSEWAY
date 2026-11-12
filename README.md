@@ -93,22 +93,6 @@ The command line still works and needs no dependencies at all:
     python -m causeway.cli investigate --repository-url https://github.com/<owner>/<repo>
                                           # investigate a repository instead of the bundled demo
 
-## The API
-
-| | |
-|---|---|
-| `GET /api/health` | is the backend up, is this machine seeded, what thresholds is the engine using |
-| `GET /api/status` | what the current investigation is doing |
-| `POST /api/investigation` | start one. `202` with a run id, or `409` naming the run already in progress |
-| `GET /api/investigation/stream` | Server-Sent Events, resumable |
-| `GET /api/investigation/{id}/events` | the whole buffer as JSON |
-| `GET /api/investigation/{id}/graph` | the causal graph, built deterministically from that same buffer - see [The causal graph](#the-causal-graph) |
-| `POST /api/telemetry` | ingest one real telemetry sample for one service |
-| `GET /api/prediction/status` | the engine's current risk assessment(s), as last computed - optionally `?service=` |
-| `GET /api/prediction/system` | the system-wide risk rollup across every service with telemetry - see [System risk](#system-risk) |
-| `POST /api/services/register` | link a service name to the GitHub repository its incidents should hand off to |
-| `GET /api/services` | the currently registered service → repository links |
-| `GET /api/monitor/stream` | Server-Sent Events - telemetry, risk, and incident events, independent of any one investigation |
 
 See [Live monitoring](#live-monitoring--telemetry-prediction-and-incident-handoff) below for what each of
 the five monitoring endpoints actually does and does not decide.
